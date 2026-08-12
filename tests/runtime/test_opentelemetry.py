@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pytest
 
+from promptrail.context import run
 from promptrail.tracing.classifier import classify_span
 from promptrail.tracing.opentelemetry import (
     PromptRailSpanProcessor,
@@ -58,6 +59,54 @@ def test_span_processor_maps_root_trace_and_parent_ids() -> None:
     assert events[0]["span_id"] == "0000000000000def"
     assert events[1]["parent_span_id"] == "0000000000000def"
     assert events[1]["kind"] == "llm"
+
+
+def test_descendant_inherits_run_from_active_parent_after_root_ends() -> None:
+    events = []
+    ends = []
+    run_ids = iter(("run-root", "run-regenerated"))
+    processor = PromptRailSpanProcessor(
+        on_event=events.append,
+        on_run_end=lambda run_id, trace_id: ends.append((run_id, trace_id)),
+        run_id_factory=lambda: next(run_ids),
+    )
+    root = _Span("workflow", 0xABC, 0xDEF)
+    child = _Span("agent", 0xABC, 0x123, parent=root.context)
+    grandchild = _Span("tool", 0xABC, 0x456, parent=child.context)
+
+    processor.on_start(root)
+    processor.on_start(child)
+    processor.on_end(root)
+    assert ends == []
+    processor.on_start(grandchild)
+    processor.on_end(grandchild)
+    processor.on_end(child)
+
+    grandchild_start = next(event for event in events if event["span_id"] == "0000000000000456")
+    assert grandchild_start["run_id"] == "run-root"
+    assert grandchild_start["parent_span_id"] == "0000000000000123"
+    assert ends == [("run-root", "00000000000000000000000000000abc")]
+
+
+def test_explicit_run_id_owns_otel_root_lifecycle() -> None:
+    starts = []
+    ends = []
+    events = []
+    processor = PromptRailSpanProcessor(
+        on_event=events.append,
+        on_run_start=lambda run_id, trace_id: starts.append((run_id, trace_id)),
+        on_run_end=lambda run_id, trace_id: ends.append((run_id, trace_id)),
+        run_id_factory=lambda: "run-generated",
+    )
+    root = _Span("workflow", 0xFED, 0xCBA)
+
+    with run(run_id="run-explicit"):
+        processor.on_start(root)
+        processor.on_end(root)
+
+    assert starts == []
+    assert ends == []
+    assert {event["run_id"] for event in events} == {"run-explicit"}
 
 
 def test_span_processor_fail_open_callbacks() -> None:

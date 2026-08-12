@@ -80,7 +80,7 @@ class HTTPSender:
             response = conn.getresponse()
             response.read()
             retryable = response.status in self.RETRYABLE_STATUSES
-            if response.status >= 400:
+            if not 200 <= response.status < 300:
                 if response.status >= 500 or retryable:
                     raise ExportError(
                         f"runtime export failed with HTTP {response.status}", retryable=retryable

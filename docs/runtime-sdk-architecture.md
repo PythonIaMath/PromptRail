@@ -15,7 +15,7 @@ PromptRail.init(
     api_key="pr_live_...",
     application="coding-agent",
     environment="production",
-    user_id=lambda: current_user_id(),
+    user_id=lambda: get_current_user_id(),
 )
 
 with run(user_id="user_123"):
@@ -71,9 +71,9 @@ User identity precedence is explicit run override, contextual user, configured r
 
 Run resolution follows this order:
 
-1. A root OpenTelemetry span is mapped to a PromptRail run ID by the span processor.
+1. A reliable root OpenTelemetry span is mapped to a PromptRail run ID by the span processor and remains authoritative for nested run scopes.
 2. `promptrail.run(...)` creates an explicit run context for sync and async code.
-3. An OpenAI-wrapped or direct header-injection call creates a short implicit run when no other boundary exists.
+3. An OpenAI-wrapped call creates a short implicit run when no other boundary exists. Direct `inject_headers(...)` and HTTP-hook calls generate a request-local fallback ID without retaining it in `contextvars`.
 
 Trace mappings contain only correlation and lifecycle data. The backend owns all analytical RunState.
 
@@ -94,7 +94,7 @@ PromptRail uses the installed global text-map propagator to inject standard trac
 
 ### OpenAI request correlation
 
-`wrap_openai(client)` returns an interface-compatible proxy. It intercepts OpenAI resource `create(...)` calls, creates an optional `gen_ai` client span, and supplies per-request `extra_headers`. Metadata is computed immediately inside the active call context and includes:
+`wrap_openai(client)` returns an interface-compatible proxy. It intercepts OpenAI resource `create(...)` calls, response modifiers, and supported streaming entry points, creates an optional `gen_ai` client span, and supplies per-request `extra_headers`. The configured gateway origin is re-evaluated for every call so changing the wrapped client's `base_url` cannot send private metadata to a direct provider. Metadata is computed immediately inside the active call context and includes:
 
 - standard `traceparent` and any configured propagated headers
 - `x-promptrail-run-id`
@@ -105,6 +105,8 @@ PromptRail uses the installed global text-map propagator to inject standard trac
 - application, environment, schema version, and SDK version
 
 Injection occurs only for configured PromptRail gateway origins. Existing caller headers win only for non-PromptRail names. PromptRail-owned identity headers are refreshed to avoid stale context leaking across concurrent requests.
+
+Streaming iterators keep the implicit run and LLM span open until exhaustion, explicit close, or an iterator error. Supported official OpenAI response modifiers receive the same correlation treatment.
 
 The explicit wrapper is preferred over monkey-patching the OpenAI package. Generic HTTP integrations can call `inject_headers(...)` or use the provided HTTP request hook.
 

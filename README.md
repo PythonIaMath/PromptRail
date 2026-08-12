@@ -90,7 +90,7 @@ PromptRail.init(
     api_key=os.environ["PROMPTRAIL_API_KEY"],
     application="my-agent",
     environment="production",
-    user_id=lambda: current_user_id(),
+    user_id=lambda: get_current_user_id(),
 )
 
 client = wrap_openai(

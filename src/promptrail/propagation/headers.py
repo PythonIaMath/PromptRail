@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from dataclasses import replace
 from urllib.parse import quote, urlsplit
 
 from ..sdk import SDK_VERSION, current_runtime_context, get_runtime_client
 from ..tracing.canonical import SCHEMA_VERSION
 from ..tracing.opentelemetry import inject_trace_headers
+from ..utils.ids import secure_id
 
 _PROMPTRAIL_HEADERS = {
     "x-promptrail-run-id",
@@ -63,33 +65,38 @@ def inject_headers(
     except Exception:
         return {}
     if not is_promptrail_gateway(url):
+        _remove_private_headers(output)
         return output
     try:
         inject_trace_headers(output)
-        context = current_runtime_context(ensure_run=ensure_run)
-        if (
-            not any(key.casefold() == "traceparent" for key in output)
-            and _valid_hex(context.trace_id, 32)
-            and _valid_hex(context.span_id, 16)
-        ):
-            output["traceparent"] = f"00-{context.trace_id}-{context.span_id}-01"
+        context = current_runtime_context()
+        if ensure_run and context.run_id is None:
+            if context.trace_id is not None:
+                context = current_runtime_context(ensure_run=True)
+            else:
+                context = replace(context, run_id=secure_id("run"))
+        trace_id = _canonical_hex(context.trace_id, 32)
+        span_id = _canonical_hex(context.span_id, 16)
+        parent_span_id = _canonical_hex(context.parent_span_id, 16)
+        if trace_id and span_id:
+            traceparent = _header_value(output, "traceparent")
+            if not _traceparent_matches(traceparent, trace_id, span_id):
+                _remove_header(output, "traceparent")
+                _remove_header(output, "tracestate")
+                output["traceparent"] = f"00-{trace_id}-{span_id}-01"
         client = get_runtime_client()
         values = {
             "x-promptrail-run-id": context.run_id,
             "x-promptrail-user-id": context.user_id,
-            "x-promptrail-trace-id": context.trace_id,
-            "x-promptrail-span-id": context.span_id,
-            "x-promptrail-parent-span-id": context.parent_span_id,
+            "x-promptrail-trace-id": trace_id,
+            "x-promptrail-span-id": span_id,
+            "x-promptrail-parent-span-id": parent_span_id,
             "x-promptrail-application": client.config.application if client else None,
             "x-promptrail-environment": client.config.environment if client else None,
             "x-promptrail-schema-version": SCHEMA_VERSION,
             "x-promptrail-sdk-version": SDK_VERSION,
         }
-        lower_to_key = {key.casefold(): key for key in output}
-        for owned in _PROMPTRAIL_HEADERS:
-            existing = lower_to_key.get(owned)
-            if existing is not None:
-                output.pop(existing, None)
+        _remove_private_headers(output)
         for key, value in values.items():
             if value is not None:
                 output[key] = _safe_header_value(value)
@@ -107,6 +114,28 @@ def _safe_header_value(value: object) -> str:
     return text
 
 
+def _remove_private_headers(headers: dict[str, str]) -> None:
+    for owned in _PROMPTRAIL_HEADERS:
+        _remove_header(headers, owned)
+
+
+def _header_value(headers: Mapping[str, str], name: str) -> str | None:
+    return next((value for key, value in headers.items() if key.casefold() == name), None)
+
+
+def _remove_header(headers: dict[str, str], name: str) -> None:
+    for key in tuple(headers):
+        if key.casefold() == name:
+            headers.pop(key, None)
+
+
+def _traceparent_matches(value: str | None, trace_id: str, span_id: str) -> bool:
+    if value is None:
+        return False
+    parts = value.split("-")
+    return len(parts) == 4 and parts[1].casefold() == trace_id and parts[2].casefold() == span_id
+
+
 def _valid_hex(value: str | None, length: int) -> bool:
     if value is None or len(value) != length:
         return False
@@ -114,6 +143,10 @@ def _valid_hex(value: str | None, length: int) -> bool:
         return int(value, 16) != 0
     except ValueError:
         return False
+
+
+def _canonical_hex(value: str | None, length: int) -> str | None:
+    return value.casefold() if _valid_hex(value, length) and value is not None else None
 
 
 __all__ = ["inject_headers", "is_promptrail_gateway"]

@@ -28,6 +28,8 @@ _span_to_trace: dict[str, str] = {}
 _span_to_run: dict[str, str] = {}
 _span_to_user: dict[str, str | None] = {}
 _span_to_run_started: dict[str, bool] = {}
+_trace_active_counts: dict[str, int] = {}
+_trace_root_ended: set[str] = set()
 
 
 def _default_run_id() -> str:
@@ -204,21 +206,26 @@ class PromptRailSpanProcessor:
             except Exception:
                 pass
             with _registry_lock:
-                run_id = _trace_to_run.get(trace_id)
+                inherited_run_id = _span_to_run.get(parent_span_id) if parent_span_id else None
+                run_id = _trace_to_run.get(trace_id) or inherited_run_id
                 run_started = False
-                if run_id is None and root:
+                if run_id is None and active_run_id:
+                    run_id = active_run_id
+                    _trace_to_run[trace_id] = run_id
+                elif run_id is None and root:
                     run_id = self._run_id_factory()
                     _trace_to_run[trace_id] = run_id
                     run_started = True
                 elif run_id is None:
                     run_id = self._run_id_factory()
                     _trace_to_run[trace_id] = run_id
-                span_run_id = active_run_id or run_id
+                span_run_id = run_id
                 _span_to_parent[span_id] = parent_span_id
                 _span_to_trace[span_id] = trace_id
                 _span_to_run[span_id] = span_run_id
                 _span_to_user[span_id] = active_user_id
                 _span_to_run_started[span_id] = run_started
+                _trace_active_counts[trace_id] = _trace_active_counts.get(trace_id, 0) + 1
             if run_started and self._on_run_start:
                 self._on_run_start(run_id, trace_id)
             if self._on_event:
@@ -252,7 +259,15 @@ class PromptRailSpanProcessor:
                 _span_to_parent.pop(span_id, None)
                 _span_to_trace.pop(span_id, None)
                 if run_started:
+                    _trace_root_ended.add(trace_id)
+                active_count = max(0, _trace_active_counts.get(trace_id, 1) - 1)
+                should_end_run = trace_id in _trace_root_ended and active_count == 0
+                if active_count:
+                    _trace_active_counts[trace_id] = active_count
+                else:
+                    _trace_active_counts.pop(trace_id, None)
                     _trace_to_run.pop(trace_id, None)
+                    _trace_root_ended.discard(trace_id)
             if self._on_event:
                 self._on_event(
                     _event(
@@ -265,7 +280,7 @@ class PromptRailSpanProcessor:
                         user_id,
                     )
                 )
-            if run_started and self._on_run_end:
+            if should_end_run and self._on_run_end:
                 self._on_run_end(run_id, trace_id)
         except Exception:
             return
@@ -324,6 +339,31 @@ def install_promptrail_span_processor(
         return None
 
 
+def ensure_current_trace_run(run_id: str, user_id: str | None = None) -> tuple[str, bool]:
+    """Attach a run to an active span that began before PromptRail was initialized."""
+
+    snapshot = current_trace_snapshot()
+    if not snapshot.trace_id:
+        return run_id, False
+    with _registry_lock:
+        existing = _trace_to_run.get(snapshot.trace_id)
+        if snapshot.span_id:
+            existing = existing or _span_to_run.get(snapshot.span_id)
+        if existing:
+            return existing, False
+        _trace_to_run[snapshot.trace_id] = run_id
+        if snapshot.span_id:
+            _span_to_parent[snapshot.span_id] = snapshot.parent_span_id
+            _span_to_trace[snapshot.span_id] = snapshot.trace_id
+            _span_to_run[snapshot.span_id] = run_id
+            _span_to_user[snapshot.span_id] = user_id
+            _span_to_run_started[snapshot.span_id] = True
+            _trace_active_counts[snapshot.trace_id] = (
+                _trace_active_counts.get(snapshot.trace_id, 0) + 1
+            )
+        return run_id, True
+
+
 def get_tracer(name: str = "promptrail", version: str | None = None) -> Any | None:
     try:
         from opentelemetry import trace  # type: ignore
@@ -357,6 +397,7 @@ __all__ = [
     "PromptRailSpanProcessor",
     "TraceSnapshot",
     "current_trace_snapshot",
+    "ensure_current_trace_run",
     "get_tracer",
     "inject_trace_headers",
     "install_promptrail_span_processor",

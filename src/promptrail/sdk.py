@@ -27,6 +27,7 @@ from .tracing.canonical import EventType, PromptRailEvent
 from .tracing.opentelemetry import (
     PromptRailSpanProcessor,
     current_trace_snapshot,
+    ensure_current_trace_run,
     install_promptrail_span_processor,
 )
 from .utils.ids import secure_id
@@ -126,9 +127,21 @@ class RuntimeClient:
         snapshot = current_trace_snapshot()
         run_id = base.run_id or snapshot.run_id
         if ensure_run and not run_id:
-            base = ensure_implicit_run()
-            run_id = base.run_id
-            self.observe_run_start(base)
+            if snapshot.trace_id:
+                run_id, created = ensure_current_trace_run(secure_id("run"), user_id=base.user_id)
+                traced = replace(
+                    base,
+                    run_id=run_id,
+                    trace_id=snapshot.trace_id,
+                    span_id=snapshot.span_id,
+                    parent_span_id=snapshot.parent_span_id,
+                )
+                if created:
+                    self.observe_run_start(traced)
+            else:
+                base = ensure_implicit_run()
+                run_id = base.run_id
+                self.observe_run_start(base)
         return replace(
             base,
             run_id=run_id,
@@ -182,9 +195,16 @@ class RuntimeClient:
             return
         observed = self.current_context()
         if observed.run_id == context.run_id:
-            context = observed
+            context = _merge_context(context, observed)
         with self._runs_lock:
+            if context.run_id in self._ended_runs:
+                self._ended_runs.discard(context.run_id)
+                with suppress(ValueError):
+                    self._ended_run_order.remove(context.run_id)
             if context.run_id in self._started_runs:
+                existing = self._run_contexts.get(context.run_id)
+                if existing is not None:
+                    self._run_contexts[context.run_id] = _merge_context(existing, context)
                 return
             self._started_runs.add(context.run_id)
             self._run_contexts[context.run_id] = context
@@ -196,10 +216,13 @@ class RuntimeClient:
             return
         observed = self.current_context()
         if observed.run_id == context.run_id:
-            context = observed
+            context = _merge_context(context, observed)
         with self._runs_lock:
             if context.run_id in self._ended_runs:
                 return
+            stored = self._run_contexts.get(context.run_id)
+            if stored is not None:
+                context = _merge_context(stored, context)
             if len(self._ended_run_order) == self._ended_run_order.maxlen:
                 oldest = self._ended_run_order.popleft()
                 self._ended_runs.discard(oldest)
@@ -299,19 +322,19 @@ def get_runtime_client() -> RuntimeClient | None:
 
 def _dispatch_otel_event(raw: dict[str, Any]) -> None:
     client = get_runtime_client()
-    if client is not None:
+    if client is not None and client.config.enable_opentelemetry:
         client.observe_otel_event(raw)
 
 
 def _dispatch_otel_run_start(run_id: str, trace_id: str) -> None:
     client = get_runtime_client()
-    if client is not None:
+    if client is not None and client.config.enable_opentelemetry:
         client.observe_otel_run_start(run_id, trace_id)
 
 
 def _dispatch_otel_run_end(run_id: str, trace_id: str) -> None:
     client = get_runtime_client()
-    if client is not None:
+    if client is not None and client.config.enable_opentelemetry:
         client.observe_otel_run_end(run_id, trace_id)
 
 
@@ -358,6 +381,18 @@ def emit_event(
 
 def _optional_text(value: Any) -> str | None:
     return value if isinstance(value, str) and value else None
+
+
+def _merge_context(base: RuntimeContext, overlay: RuntimeContext) -> RuntimeContext:
+    """Enrich lifecycle identity without discarding previously known fields."""
+
+    return RuntimeContext(
+        user_id=overlay.user_id or base.user_id,
+        run_id=overlay.run_id or base.run_id,
+        trace_id=overlay.trace_id or base.trace_id,
+        span_id=overlay.span_id or base.span_id,
+        parent_span_id=overlay.parent_span_id or base.parent_span_id,
+    )
 
 
 def _normalize_otel_status(value: Any, phase: str, *, has_error: bool = False) -> str:

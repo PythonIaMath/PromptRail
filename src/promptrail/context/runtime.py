@@ -117,13 +117,21 @@ class RunContext:
         parent_span_id: str | None = None,
     ) -> None:
         parent = current_runtime_context()
+        trace_run_id: str | None = None
+        try:
+            from promptrail.tracing.opentelemetry import current_trace_snapshot
+
+            trace_run_id = current_trace_snapshot().run_id
+        except Exception:
+            pass
         self.context = RuntimeContext(
             user_id=user_id or parent.user_id or current_user_id(),
-            run_id=run_id or secure_id("run"),
+            run_id=trace_run_id or run_id or parent.run_id or secure_id("run"),
             trace_id=trace_id or parent.trace_id,
             span_id=span_id or parent.span_id,
             parent_span_id=parent_span_id or parent.parent_span_id,
         )
+        self._owns_lifecycle = trace_run_id is None and self.context.run_id != parent.run_id
         self._token: contextvars.Token[RuntimeContext | None] | None = None
         self._exc: BaseException | None = None
 
@@ -156,6 +164,8 @@ class RunContext:
         return self.__exit__(exc_type, exc, tb)
 
     def _safe_start(self) -> None:
+        if not self._owns_lifecycle:
+            return
         try:
             callback = _lifecycle_callbacks.on_run_start
             if callback:
@@ -168,6 +178,8 @@ class RunContext:
             )
 
     def _safe_end(self, exc: BaseException | None) -> None:
+        if not self._owns_lifecycle:
+            return
         try:
             callback = _lifecycle_callbacks.on_run_end
             if callback:

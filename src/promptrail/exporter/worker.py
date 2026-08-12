@@ -33,6 +33,7 @@ class ExportWorker:
         self.max_retries = max(1, int(getattr(config, "max_export_retries", 3)))
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
+        self._shutdown_deadline: float | None = None
         self._dropped_serialization = 0
         self._failed_exports = 0
 
@@ -54,12 +55,14 @@ class ExportWorker:
         return self.queue.put_nowait(event)
 
     def shutdown(self, timeout: float | None = None) -> None:
+        budget = self.shutdown_timeout if timeout is None else max(0.0, timeout)
+        deadline = time.monotonic() + budget
+        self._shutdown_deadline = deadline
         self._stop.set()
         if self._thread:
-            self._thread.join(self.shutdown_timeout if timeout is None else timeout)
-        deadline = time.monotonic() + (
-            self.shutdown_timeout if timeout is None else max(0.0, timeout)
-        )
+            self._thread.join(max(0.0, deadline - time.monotonic()))
+            if self._thread.is_alive():
+                return
         self._drain_until(deadline)
         with suppress(Exception):
             self.sender.close()
@@ -104,6 +107,7 @@ class ExportWorker:
             self._send_with_backoff(batch, deadline=deadline)
 
     def _send_with_backoff(self, batch: list[Any], deadline: float | None = None) -> None:
+        deadline = deadline or self._shutdown_deadline
         try:
             body = self.encoder.encode(batch)
         except SerializationError:
@@ -132,8 +136,6 @@ class ExportWorker:
             sleep_for = delay + random.uniform(0, delay / 4)
             if deadline is not None:
                 sleep_for = min(sleep_for, max(0.0, deadline - time.monotonic()))
-            if self._stop.is_set() and deadline is None:
-                return
             if sleep_for <= 0:
                 return
             time.sleep(sleep_for)

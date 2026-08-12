@@ -235,7 +235,7 @@ uv run pytest -q -s tests/performance/test_runtime_overhead.py
 ## Current limitations
 
 - Transparent OpenAI injection requires `wrap_openai` or an HTTP hook. Endpoint-only injection would require brittle global monkey-patching, which the SDK intentionally avoids.
-- OpenAI streaming requests are correlated correctly, but the wrapper span currently ends when the stream object is created rather than when the caller finishes consuming it.
+- Abandoned stream objects should be explicitly closed so their instrumentation contexts are released promptly.
 - Automatic root-run detection observes spans started after `PromptRail.init()`.
 - Thread-pool propagation requires `submit_with_context` or an equivalent `contextvars.copy_context()` wrapper.
 - The MVP includes only the OpenTelemetry adapter. It does not import historical traces.

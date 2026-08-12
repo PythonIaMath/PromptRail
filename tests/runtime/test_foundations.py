@@ -61,6 +61,23 @@ def test_async_run_context_manager() -> None:
     assert current_run_id() is None
 
 
+def test_nested_run_scope_inherits_outer_run_by_default() -> None:
+    seen: list[str] = []
+    set_lifecycle_callbacks(
+        RuntimeLifecycleCallbacks(
+            on_run_start=lambda context: seen.append("start"),
+            on_run_end=lambda context, error: seen.append("end"),
+        )
+    )
+    try:
+        with run(user_id="outer-user", run_id="run_outer"), run() as nested:
+            assert nested.run_id == "run_outer"
+            assert nested.user_id == "outer-user"
+        assert seen == ["start", "end"]
+    finally:
+        set_lifecycle_callbacks()
+
+
 def test_context_copy_to_thread_pool() -> None:
     with (
         ThreadPoolExecutor(max_workers=1) as executor,
@@ -103,6 +120,11 @@ def test_privacy_policy_bounds_and_no_arbitrary_object_serialization() -> None:
         {
             "model": "abcdef",
             "messages": ["secret"],
+            "api_key": "pr_live_SECRET",
+            "authorization": "Bearer SECRET",
+            "db.statement": "select * from proprietary_data",
+            "request.url": "https://example.test/private?token=secret",
+            "summary": "raw proprietary prompt text",
             "nested": {"ok": True, "object": Sensitive(), "more": 3},
             "extra": "dropped-by-item-limit",
         }

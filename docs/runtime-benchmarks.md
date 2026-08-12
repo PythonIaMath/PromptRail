@@ -16,10 +16,10 @@ Measured 2026-08-12 on macOS aarch64 with CPython 3.11.15. Export was disabled, 
 
 | Operation | Median | P99 | Product target |
 | --- | ---: | ---: | --- |
-| Context lookup | 0.0018 ms | 0.0022 ms | P50 < 0.100 ms, P99 < 1.000 ms |
-| Event creation | 0.0051 ms | 0.0063 ms | P50 < 0.100 ms, P99 < 1.000 ms |
-| Queue insertion | 0.0035 ms | 0.0051 ms | P50 < 0.100 ms, P99 < 1.000 ms |
-| Header injection | 0.0058 ms | 0.0070 ms | Typical < 0.100 ms |
-| Span processing | 0.0038 ms | 0.0073 ms | P50 < 0.100 ms, P99 < 1.000 ms |
+| Context lookup | 0.0018 ms | 0.0025 ms | P50 < 0.100 ms, P99 < 1.000 ms |
+| Event creation | 0.0056 ms | 0.0072 ms | P50 < 0.100 ms, P99 < 1.000 ms |
+| Queue insertion | 0.0033 ms | 0.0057 ms | P50 < 0.100 ms, P99 < 1.000 ms |
+| Header injection | 0.0070 ms | 0.0087 ms | Typical < 0.100 ms |
+| Span processing | 0.0040 ms | 0.0083 ms | P50 < 0.100 ms, P99 < 1.000 ms |
 
 All measured local paths are comfortably below the requested targets on this machine. These numbers are not network or end-to-end inference benchmarks. Re-run on deployment runtimes and track changes across SDK releases.

@@ -24,6 +24,17 @@ _CONTENT_KEY_PARTS = (
     "tool_input",
     "tool_output",
     "response",
+    "statement",
+    "url",
+)
+_SECRET_KEY_PARTS = (
+    "api_key",
+    "apikey",
+    "authorization",
+    "cookie",
+    "credential",
+    "password",
+    "secret",
 )
 _SAFE_METADATA_SUFFIXES = (
     "_chars",
@@ -40,6 +51,34 @@ _SAFE_METADATA_SUFFIXES = (
     "_status",
     "_tokens",
     "_type",
+    "_method",
+    "_operation",
+    "_phase",
+    "_provider",
+    "_system",
+)
+_SAFE_METADATA_KEYS = {
+    "duration_ms",
+    "error_type",
+    "kind",
+    "model",
+    "name",
+    "operation",
+    "phase",
+    "provider",
+    "status",
+}
+_SAFE_METADATA_PREFIXES = (
+    "agent_",
+    "branch_",
+    "error_",
+    "gen_ai_",
+    "llm_",
+    "otel_",
+    "promptrail_",
+    "retrieval_",
+    "tool_",
+    "workflow_",
 )
 
 
@@ -65,13 +104,25 @@ class PrivacyPolicy:
         sanitized = self._sanitize_mapping(attributes, depth=0, budget=budget)
         return sanitized if isinstance(sanitized, dict) else {}
 
-    def _allows_key(self, key: str) -> bool:
+    def _allows_item(self, key: str, value: Any) -> bool:
         if self.mode == "content":
             return True
         normalized = key.lower().replace("-", "_").replace(".", "_")
-        if not any(part in normalized for part in _CONTENT_KEY_PARTS):
+        if any(part in normalized for part in _SECRET_KEY_PARTS):
+            return False
+        if normalized == "token" or normalized.endswith("_token"):
+            return False
+        if any(part in normalized for part in _CONTENT_KEY_PARTS):
+            return normalized.endswith(_SAFE_METADATA_SUFFIXES)
+        if normalized in _SAFE_METADATA_KEYS:
             return True
-        return normalized.endswith(_SAFE_METADATA_SUFFIXES)
+        if normalized.startswith(_SAFE_METADATA_PREFIXES):
+            return True
+        if normalized.endswith(_SAFE_METADATA_SUFFIXES):
+            return True
+        if isinstance(value, Mapping):
+            return True
+        return value is None or isinstance(value, bool | int | float)
 
     def _sanitize_mapping(
         self, value: Mapping[str, Any], depth: int, budget: _Budget
@@ -84,7 +135,7 @@ class PrivacyPolicy:
                 break
             if not isinstance(raw_key, str):
                 continue
-            if not self._allows_key(raw_key):
+            if not self._allows_item(raw_key, raw_item):
                 continue
             if not budget.take():
                 break

@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 import json
+import threading
 import time
 from dataclasses import dataclass
 
 import pytest
 
 from promptrail.exporter.encoder import BatchJSONEncoder, SerializationError
-from promptrail.exporter.http import ExportError
+from promptrail.exporter.http import ExportError, HTTPSender
 from promptrail.exporter.queue import EventQueue
 from promptrail.exporter.worker import ExportWorker
 
@@ -130,3 +131,61 @@ def test_worker_flushes_by_batch_size_on_daemon_thread():
         assert decoded_batches(sender) == [[{"id": 1, "type": "test"}, {"id": 2, "type": "test"}]]
     finally:
         worker.shutdown(timeout=1)
+
+
+def test_shutdown_timeout_does_not_drain_concurrently_with_blocked_worker():
+    class BlockingSender(FakeSender):
+        def __init__(self) -> None:
+            super().__init__()
+            self.started = threading.Event()
+            self.release = threading.Event()
+            self.active = 0
+            self.max_active = 0
+
+        def send(self, body: bytes, headers):
+            self.active += 1
+            self.max_active = max(self.max_active, self.active)
+            self.started.set()
+            self.release.wait(timeout=1)
+            self.active -= 1
+
+    sender = BlockingSender()
+    worker = ExportWorker(Config(export_batch_size=1, export_flush_interval=0.01), sender=sender)
+    worker.start()
+    assert worker.enqueue(Event(1))
+    assert sender.started.wait(timeout=1)
+
+    started = time.monotonic()
+    worker.shutdown(timeout=0.02)
+    elapsed = time.monotonic() - started
+
+    assert elapsed < 0.1
+    assert sender.max_active == 1
+    assert sender.closed is False
+    sender.release.set()
+    worker.shutdown(timeout=0.2)
+    assert sender.closed is True
+
+
+def test_http_sender_rejects_redirects() -> None:
+    class Response:
+        status = 302
+
+        def read(self) -> bytes:
+            return b""
+
+    class Connection:
+        def request(self, *args, **kwargs) -> None:
+            pass
+
+        def getresponse(self) -> Response:
+            return Response()
+
+        def close(self) -> None:
+            pass
+
+    sender = HTTPSender(Config())
+    sender._conn = Connection()  # type: ignore[assignment]
+    with pytest.raises(ExportError) as exc:
+        sender.send(b"{}")
+    assert exc.value.retryable is False
