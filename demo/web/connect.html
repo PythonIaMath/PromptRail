@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="color-scheme" content="light" />
+  <title>Connect historical traces · PromptRail</title>
+  <meta name="description" content="Connect a trace platform or import JSON to teach PromptRail how your application normally executes." />
+  <link rel="stylesheet" href="/connect.css" />
+  <script src="/connect.js" defer></script>
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="/" aria-label="PromptRail home">
+      <span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span>
+      <strong>PromptRail</strong>
+    </a>
+    <div class="top-actions">
+      <span class="status-pill"><i></i> Control plane online</span>
+      <button class="icon-button" aria-label="Open help">?</button>
+      <div class="avatar" aria-label="Workspace account">Z</div>
+    </div>
+  </header>
+
+  <div class="app-shell">
+    <aside class="sidebar" aria-label="Primary navigation">
+      <nav>
+        <a href="#"><span>⌂</span> Overview</a>
+        <a class="active" href="/connect"><span>⇄</span> Connections</a>
+        <a href="#"><span>⌁</span> Traces</a>
+        <a href="#"><span>◎</span> Budgets</a>
+        <a href="#"><span>◇</span> Models</a>
+      </nav>
+      <div class="sidebar-bottom">
+        <a href="#"><span>⚙</span> Settings</a>
+        <div class="workspace"><span class="workspace-logo">A</span><div><strong>Acme AI</strong><small>Production</small></div><b>⌄</b></div>
+      </div>
+    </aside>
+
+    <main>
+      <section class="hero">
+        <div class="eyebrow"><span>01</span> HISTORICAL CONTEXT</div>
+        <h1>Connect your<br />historical traces <em>once.</em></h1>
+        <p>PromptRail learns how your application normally executes, observes the current run, and dynamically assigns a cost and latency budget to every LLM call.</p>
+        <div class="flow" aria-label="Connection flow">
+          <div><span class="flow-icon source">⌁</span><small>YOUR TRACES</small><strong>Historical runs</strong></div>
+          <span class="flow-line"><i></i></span>
+          <div class="flow-active"><span class="flow-icon rail">P</span><small>PROMPTRAIL</small><strong>Learn patterns</strong></div>
+          <span class="flow-line"><i></i></span>
+          <div><span class="flow-icon endpoint">↗</span><small>LLM ENDPOINT</small><strong>Budget every call</strong></div>
+        </div>
+      </section>
+
+      <section class="connection-panel">
+        <div class="panel-heading">
+          <div><span class="step-number">1</span><div><h2>Choose a trace source</h2><p>Connect your existing platform or upload trace data directly.</p></div></div>
+          <span class="secure-note">⌾ Credentials are encrypted</span>
+        </div>
+
+        <div class="tabs" role="tablist">
+          <button class="tab active" role="tab" aria-selected="true" data-tab="providers">Connect a platform <span>6</span></button>
+          <button class="tab" role="tab" aria-selected="false" data-tab="json">Import JSON</button>
+        </div>
+
+        <div id="providers-panel" class="tab-panel active" role="tabpanel">
+          <div class="provider-grid">
+            <button class="provider-card" data-provider="LangSmith" data-color="#1e7f5d"><span class="provider-logo langsmith">L</span><span><strong>LangSmith</strong><small>Sync projects and traces</small></span><b>→</b></button>
+            <button class="provider-card" data-provider="Langfuse" data-color="#e96f39"><span class="provider-logo langfuse">◒</span><span><strong>Langfuse</strong><small>Import observations</small></span><b>→</b></button>
+            <button class="provider-card" data-provider="Braintrust" data-color="#6657db"><span class="provider-logo braintrust">B</span><span><strong>Braintrust</strong><small>Connect experiments</small></span><b>→</b></button>
+            <button class="provider-card" data-provider="Helicone" data-color="#6b5cff"><span class="provider-logo helicone">H</span><span><strong>Helicone</strong><small>Sync request history</small></span><b>→</b></button>
+            <button class="provider-card" data-provider="OpenTelemetry" data-color="#ef7b19"><span class="provider-logo otel">◫</span><span><strong>OpenTelemetry</strong><small>Receive OTLP traces</small></span><b>→</b></button>
+            <button class="provider-card" data-provider="Custom API" data-color="#111827"><span class="provider-logo custom">⌘</span><span><strong>Custom API</strong><small>Bring your own source</small></span><b>→</b></button>
+          </div>
+          <p class="provider-footnote">Don't see your platform? <button id="custom-link">Use our trace ingestion API →</button></p>
+        </div>
+
+        <div id="json-panel" class="tab-panel" role="tabpanel">
+          <div class="upload-zone" id="upload-zone" tabindex="0" role="button" aria-label="Upload JSON trace data">
+            <input id="file-input" type="file" accept=".json,.jsonl,application/json" hidden />
+            <span class="upload-icon">↥</span>
+            <h3>Drop your trace data here</h3>
+            <p>or <button id="browse-button">browse your computer</button></p>
+            <small>JSON or JSONL · Maximum 50 MB · OpenTelemetry schema supported</small>
+          </div>
+          <div class="json-example"><div><strong>Expected structure</strong><span>Auto-detected</span></div><pre>{
+  <i>"trace_id"</i>: "tr_01J...",
+  <i>"spans"</i>: [{
+    <i>"model"</i>: "gpt-5",
+    <i>"input_tokens"</i>: 2840,
+    <i>"latency_ms"</i>: 920
+  }]
+}</pre></div>
+        </div>
+      </section>
+
+      <footer class="page-footer"><span>PromptRail processes trace metadata only. Prompt and response content can be excluded.</span><a href="#">Data handling & privacy ↗</a></footer>
+    </main>
+  </div>
+
+  <div class="scrim" id="scrim" hidden></div>
+  <aside class="drawer" id="drawer" aria-hidden="true" aria-label="Connect trace provider">
+    <button class="drawer-close" id="drawer-close" aria-label="Close">×</button>
+    <div class="drawer-provider"><span class="provider-logo" id="drawer-logo">L</span><span><small>CONNECT SOURCE</small><strong id="drawer-title">LangSmith</strong></span></div>
+    <div class="drawer-copy"><h2>Bring your execution history into PromptRail.</h2><p>We use read-only access to learn call patterns, model behavior, cost, and latency. Your credentials never leave the encrypted control plane.</p></div>
+    <form id="connection-form">
+      <label>API key<input id="api-key" type="password" placeholder="••••••••••••••••••••" required autocomplete="off" /><span>Read-only credentials recommended</span></label>
+      <label>Project or workspace <input id="project-name" type="text" placeholder="production-agent" required /></label>
+      <label class="checkbox"><input type="checkbox" checked /><span><b>Exclude prompt and response content</b><small>Only import metadata, usage, timing, and relationships.</small></span></label>
+      <button class="connect-button" type="submit"><span>Test & connect</span><b>→</b></button>
+    </form>
+    <div class="drawer-footer">By connecting, you allow PromptRail to perform an initial historical sync and observe new traces.</div>
+  </aside>
+
+  <div class="toast" id="toast" role="status"><span>✓</span><div><strong>Trace source connected</strong><small>Historical sync has started.</small></div></div>
+</body>
+</html>
