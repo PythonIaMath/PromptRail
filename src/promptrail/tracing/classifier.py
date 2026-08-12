@@ -25,7 +25,16 @@ _LLM_SYSTEMS = {
     "openai",
     "vertex_ai",
 }
-_RETRIEVAL_SYSTEMS = {"chroma", "elasticsearch", "milvus", "pinecone", "qdrant", "redis", "vector", "weaviate"}
+_RETRIEVAL_SYSTEMS = {
+    "chroma",
+    "elasticsearch",
+    "milvus",
+    "pinecone",
+    "qdrant",
+    "redis",
+    "vector",
+    "weaviate",
+}
 
 
 def _text(value: Any) -> str:
@@ -62,7 +71,8 @@ def classify_span(span_or_attributes: Any, name: str | None = None) -> SpanKind:
     try:
         attributes = _attributes(span_or_attributes)
         explicit = _text(
-            attributes.get("promptrail.span.kind")
+            attributes.get("promptrail.span.type")
+            or attributes.get("promptrail.span.kind")
             or attributes.get("promptrail.kind")
             or attributes.get("llm.span.kind")
             or attributes.get("span.kind")
@@ -82,21 +92,41 @@ def classify_span(span_or_attributes: Any, name: str | None = None) -> SpanKind:
         if operation in {"retrieve", "search", "query"}:
             return "retrieval"
 
-        system = _text(attributes.get("gen_ai.system") or attributes.get("llm.system") or attributes.get("db.system"))
+        system = _text(
+            attributes.get("gen_ai.system")
+            or attributes.get("llm.system")
+            or attributes.get("db.system")
+        )
         if system in _LLM_SYSTEMS or system.startswith("openai"):
             return "llm"
         if system in _RETRIEVAL_SYSTEMS:
             return "retrieval"
 
-        if any(key in attributes for key in ("gen_ai.request.model", "gen_ai.response.model", "llm.model_name", "ai.model.id")):
+        if any(
+            key in attributes
+            for key in (
+                "gen_ai.request.model",
+                "gen_ai.response.model",
+                "llm.model_name",
+                "ai.model.id",
+            )
+        ):
             return "llm"
-        if any(key in attributes for key in ("tool.name", "tool.call.id", "function.name", "gen_ai.tool.name")):
+        if any(
+            key in attributes
+            for key in ("tool.name", "tool.call.id", "function.name", "gen_ai.tool.name")
+        ):
             return "tool"
-        if any(key in attributes for key in ("retrieval.query", "retrieval.documents", "db.vector.query", "vector.top_k")):
+        if any(
+            key in attributes
+            for key in ("retrieval.query", "retrieval.documents", "db.vector.query", "vector.top_k")
+        ):
             return "retrieval"
         if any(key in attributes for key in ("agent.name", "agent.id", "ai.agent.name")):
             return "agent"
-        if any(key in attributes for key in ("workflow.name", "workflow.id", "job.name", "task.name")):
+        if any(
+            key in attributes for key in ("workflow.name", "workflow.id", "job.name", "task.name")
+        ):
             return "workflow"
         if any(key in attributes for key in ("branch.name", "branch.id", "decision.branch")):
             return "branch"
@@ -109,7 +139,10 @@ def classify_span(span_or_attributes: Any, name: str | None = None) -> SpanKind:
             return "tool"
         if any(word in tokens.split() for word in ("retrieve", "retrieval", "rerank", "search")):
             return "retrieval"
-        if any(word in tokens.split() for word in ("llm", "chat", "completion", "embedding", "openai", "anthropic")):
+        if any(
+            word in tokens.split()
+            for word in ("llm", "chat", "completion", "embedding", "openai", "anthropic")
+        ):
             return "llm"
         if any(word in tokens.split() for word in ("workflow", "pipeline", "run")):
             return "workflow"

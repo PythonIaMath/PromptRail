@@ -17,7 +17,9 @@ class _Context:
 
 
 class _Span:
-    def __init__(self, name: str, trace_id: int, span_id: int, parent=None, attributes=None) -> None:
+    def __init__(
+        self, name: str, trace_id: int, span_id: int, parent=None, attributes=None
+    ) -> None:
         self.name = name
         self.context = _Context(trace_id, span_id)
         self.parent = parent
@@ -59,7 +61,9 @@ def test_span_processor_maps_root_trace_and_parent_ids() -> None:
 
 
 def test_span_processor_fail_open_callbacks() -> None:
-    processor = PromptRailSpanProcessor(on_event=lambda event: (_ for _ in ()).throw(RuntimeError("boom")))
+    processor = PromptRailSpanProcessor(
+        on_event=lambda event: (_ for _ in ()).throw(RuntimeError("boom"))
+    )
     processor.on_start(_Span("tool", 1, 2, attributes={"tool.name": "x"}))
     processor.on_end(_Span("tool", 1, 2, attributes={"tool.name": "x"}))
 
@@ -76,7 +80,7 @@ def test_current_trace_snapshot_without_active_span_is_safe() -> None:
     assert snapshot.span_id is None or len(snapshot.span_id) == 16
 
 
-def test_install_with_real_sdk_if_available() -> None:
+def test_install_with_real_sdk_if_available(monkeypatch: pytest.MonkeyPatch) -> None:
     pytest.importorskip("opentelemetry.sdk.trace")
     from opentelemetry import trace
     from opentelemetry.sdk.trace import TracerProvider
@@ -84,7 +88,7 @@ def test_install_with_real_sdk_if_available() -> None:
     from promptrail.tracing.opentelemetry import install_promptrail_span_processor
 
     provider = TracerProvider()
-    trace.set_tracer_provider(provider)
+    monkeypatch.setattr(trace, "get_tracer_provider", lambda: provider)
     processor = install_promptrail_span_processor()
     assert processor is not None
     assert install_promptrail_span_processor() is None

@@ -3,8 +3,10 @@ from __future__ import annotations
 import gzip
 import http.client
 import ssl
+from collections.abc import Mapping
+from contextlib import suppress
 from dataclasses import dataclass
-from typing import Mapping
+from typing import ClassVar
 from urllib.parse import urlsplit
 
 
@@ -23,10 +25,12 @@ class ExportError(Exception):
 class HTTPSender:
     """Persistent stdlib HTTP(S) sender with TLS validation and keep-alive."""
 
-    RETRYABLE_STATUSES = {408, 425, 429, 500, 502, 503, 504}
+    RETRYABLE_STATUSES: ClassVar[set[int]] = {408, 425, 429, 500, 502, 503, 504}
 
     def __init__(self, config: object, path: str = "/v1/runtime/events") -> None:
-        endpoint = getattr(config, "endpoint", None) or getattr(config, "runtime_events_endpoint", None)
+        endpoint = getattr(config, "endpoint", None) or getattr(
+            config, "runtime_events_endpoint", None
+        )
         if not endpoint:
             raise ValueError("runtime exporter endpoint is required")
         self._url = urlsplit(endpoint)
@@ -46,9 +50,13 @@ class HTTPSender:
             return self._conn
         if self._url.scheme == "https":
             context = ssl.create_default_context()
-            self._conn = http.client.HTTPSConnection(self._url.hostname, self._url.port, timeout=self._timeout, context=context)
+            self._conn = http.client.HTTPSConnection(
+                self._url.hostname, self._url.port, timeout=self._timeout, context=context
+            )
         else:
-            self._conn = http.client.HTTPConnection(self._url.hostname, self._url.port, timeout=self._timeout)
+            self._conn = http.client.HTTPConnection(
+                self._url.hostname, self._url.port, timeout=self._timeout
+            )
         return self._conn
 
     def send(self, body: bytes, headers: Mapping[str, str] | None = None) -> ExportResponse:
@@ -74,22 +82,26 @@ class HTTPSender:
             retryable = response.status in self.RETRYABLE_STATUSES
             if response.status >= 400:
                 if response.status >= 500 or retryable:
-                    raise ExportError(f"runtime export failed with HTTP {response.status}", retryable=retryable)
-                raise ExportError(f"runtime export rejected with HTTP {response.status}", retryable=False)
+                    raise ExportError(
+                        f"runtime export failed with HTTP {response.status}", retryable=retryable
+                    )
+                raise ExportError(
+                    f"runtime export rejected with HTTP {response.status}", retryable=False
+                )
             return ExportResponse(response.status, retryable=False)
         except ExportError:
             raise
         except Exception as exc:
             self.close()
-            raise ExportError(f"runtime export transport error: {type(exc).__name__}", retryable=True) from None
+            raise ExportError(
+                f"runtime export transport error: {type(exc).__name__}", retryable=True
+            ) from None
 
     def close(self) -> None:
         conn, self._conn = self._conn, None
         if conn is not None:
-            try:
+            with suppress(Exception):
                 conn.close()
-            except Exception:
-                pass
 
 
-__all__ = ["HTTPSender", "ExportResponse", "ExportError"]
+__all__ = ["ExportError", "ExportResponse", "HTTPSender"]

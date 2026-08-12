@@ -1,4 +1,4 @@
-"""Correlate asynchronous agent steps with a PromptRail runtime run."""
+"""Show contextvars propagation through an asynchronous agent workflow."""
 
 from __future__ import annotations
 
@@ -8,21 +8,25 @@ import os
 from promptrail import PromptRail, current_runtime_context, event, run
 
 
-async def agent_step(name: str, delay: float = 0.01) -> str:
-    event("agent.step.started", {"step": name})
-    await asyncio.sleep(delay)
-    event("agent.step.completed", {"step": name})
+async def agent_step(name: str) -> str:
+    event("agent.start", name=name)
+    await asyncio.sleep(0.01)
+    event("agent.end", name=name, status="success")
     return f"{name}:ok"
 
 
 async def main() -> None:
-    rail = PromptRail(project=os.environ.get("PROMPTRAIL_PROJECT", "examples"))
-
-    with run("async-agent", runtime=rail, metadata={"example": "async_agent"}):
-        ctx = current_runtime_context()
-        plan = await agent_step("plan")
-        answer = await agent_step("answer")
-        print({"run_id": getattr(ctx, "run_id", None), "steps": [plan, answer]})
+    PromptRail.init(
+        api_key=os.environ.get("PROMPTRAIL_API_KEY"),
+        application="async-agent-example",
+        export_enabled=bool(os.environ.get("PROMPTRAIL_API_KEY")),
+    )
+    try:
+        async with run(user_id="async-example-user"):
+            steps = [await agent_step("plan"), await agent_step("answer")]
+            print({"context": current_runtime_context(), "steps": steps})
+    finally:
+        PromptRail.shutdown()
 
 
 if __name__ == "__main__":

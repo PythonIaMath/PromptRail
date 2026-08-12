@@ -62,8 +62,9 @@ def test_async_run_context_manager() -> None:
 
 
 def test_context_copy_to_thread_pool() -> None:
-    with ThreadPoolExecutor(max_workers=1) as executor, run(
-        user_id="thread-user", run_id="run_thread"
+    with (
+        ThreadPoolExecutor(max_workers=1) as executor,
+        run(user_id="thread-user", run_id="run_thread"),
     ):
         future = submit_with_context(executor, current_runtime_context)
         assert future.result(timeout=5).run_id == "run_thread"

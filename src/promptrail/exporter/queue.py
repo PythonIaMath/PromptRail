@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from contextlib import suppress
 from queue import Empty, Full, Queue
 from threading import Lock
 from typing import Any
@@ -34,10 +35,8 @@ class EventQueue:
         return self._queue.get_nowait()
 
     def task_done(self) -> None:
-        try:
+        with suppress(ValueError):
             self._queue.task_done()
-        except ValueError:
-            pass
 
     def empty(self) -> bool:
         return self._queue.empty()
@@ -50,4 +49,4 @@ class EventQueue:
         return self.dropped_full + self.dropped_error
 
 
-__all__ = ["EventQueue", "Empty"]
+__all__ = ["Empty", "EventQueue"]

@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import statistics
 import time
+from typing import ClassVar
 
-from promptrail import PromptRail, RuntimeContext, current_runtime_context, run
+from promptrail import PromptRail, current_runtime_context, run
 from promptrail.exporter.queue import EventQueue
 from promptrail.tracing import EventType, PromptRailEvent
 from promptrail.tracing.opentelemetry import PromptRailSpanProcessor
@@ -32,7 +33,7 @@ class _Context:
 
 class _Span:
     name = "openai.chat.completions.create"
-    attributes = {"gen_ai.system": "openai"}
+    attributes: ClassVar[dict[str, str]] = {"gen_ai.system": "openai"}
     status = None
     start_time = 1_000_000
     end_time = 2_000_000
@@ -44,10 +45,14 @@ class _Span:
 
 def test_runtime_hot_path_overhead_benchmark_style(capsys) -> None:
     PromptRail.shutdown(timeout=0)
-    PromptRail.init(gateway_url=GATEWAY, user_id="bench-user", export_enabled=False, enable_opentelemetry=False)
+    PromptRail.init(
+        gateway_url=GATEWAY, user_id="bench-user", export_enabled=False, enable_opentelemetry=False
+    )
     queue = EventQueue(maxsize=ITERATIONS + 10)
     span_events: list[dict] = []
-    processor = PromptRailSpanProcessor(on_event=span_events.append, run_id_factory=lambda: "run_bench")
+    processor = PromptRailSpanProcessor(
+        on_event=span_events.append, run_id_factory=lambda: "run_bench"
+    )
 
     with run(run_id="run_bench", trace_id="1" * 32, span_id="2" * 16):
         event_context = current_runtime_context()
@@ -59,8 +64,12 @@ def test_runtime_hot_path_overhead_benchmark_style(capsys) -> None:
                 context=event_context,
                 attributes={"model": "gpt-4o-mini", "messages": ["redacted"]},
             ),
-            "queue_insertion": lambda: queue.put_nowait(PromptRailEvent(EventType.OTHER_START, run_id="run_bench")),
-            "header_injection": lambda: PromptRail.inject_headers({"authorization": "keep"}, url=GATEWAY),
+            "queue_insertion": lambda: queue.put_nowait(
+                PromptRailEvent(EventType.OTHER_START, run_id="run_bench")
+            ),
+            "header_injection": lambda: PromptRail.inject_headers(
+                {"authorization": "keep"}, url=GATEWAY
+            ),
             "span_processing": lambda: (processor.on_start(_Span()), processor.on_end(_Span())),
         }
 

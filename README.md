@@ -69,6 +69,64 @@ uv sync --extra dev
 The core package only requires Pydantic. Install `promptrail[langchain]` when using
 the middleware and `promptrail[http]` for HTTP integrations.
 
+## Runtime SDK
+
+The Runtime SDK gives the PromptRail gateway current application, user, run,
+trace, and span identity. It observes execution only. Routing, provider selection,
+context compaction, cache management, reasoning control, and budget allocation
+remain in the existing server-side systems.
+
+```bash
+pip install "promptrail[opentelemetry,openai]"
+```
+
+```python
+import os
+
+from openai import OpenAI
+from promptrail import PromptRail, wrap_openai
+
+PromptRail.init(
+    api_key=os.environ["PROMPTRAIL_API_KEY"],
+    application="my-agent",
+    environment="production",
+    user_id=lambda: current_user_id(),
+)
+
+client = wrap_openai(
+    OpenAI(
+        base_url="https://api.promptrail.ai/v1",
+        api_key=os.environ["PROMPTRAIL_API_KEY"],
+    )
+)
+```
+
+`wrap_openai` keeps the official OpenAI interface and supplies fresh per-request
+headers without monkey-patching the OpenAI package. Generic HTTP clients can use
+`inject_headers`, `httpx_request_hook`, or `async_httpx_request_hook` instead.
+PromptRail-specific headers are added only for the configured gateway origin.
+
+When OpenTelemetry is installed, `PromptRail.init()` adds a span processor to the
+existing `TracerProvider`. It does not replace the provider or its exporters. An
+explicit run remains available for applications without a reliable root trace:
+
+```python
+from promptrail import event, run
+
+with run(user_id="tenant_3:user_81"):
+    event("workflow.stage", name="verification")
+    result = agent.invoke(...)
+```
+
+Runtime events are queued to a bounded background exporter, batched, retried, and
+flushed at shutdown. Instrumentation and export failures are fail-open. Telemetry
+defaults to `metadata_only`; raw content capture requires `capture_content=True`.
+
+See [the Runtime SDK guide](docs/runtime-sdk.md),
+[architecture](docs/runtime-sdk-architecture.md), and
+[event schema](docs/runtime-event-schema.md).
+
+
 ## LangChain integration
 
 `PromptRailMiddleware` requires an explicit model factory. This is the trust

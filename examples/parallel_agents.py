@@ -1,31 +1,34 @@
-"""Correlate parallel agent work under one PromptRail runtime run."""
+"""Run parallel async branches under one run with isolated child contexts."""
 
 from __future__ import annotations
 
-import concurrent.futures
+import asyncio
 import os
 
 from promptrail import PromptRail, current_runtime_context, event, run
 
 
-def worker(name: str) -> str:
-    ctx = current_runtime_context()
-    event("parallel.worker.started", {"worker": name, "run_id": getattr(ctx, "run_id", None)})
-    result = f"{name}:complete"
-    event("parallel.worker.completed", {"worker": name})
-    return result
+async def worker(name: str) -> dict[str, str | None]:
+    event("branch.start", name=name)
+    await asyncio.sleep(0.01)
+    context = current_runtime_context()
+    event("branch.end", name=name, status="success")
+    return {"worker": name, "run_id": context.run_id, "user_id": context.user_id}
 
 
-def main() -> None:
-    rail = PromptRail(project=os.environ.get("PROMPTRAIL_PROJECT", "examples"))
-    workers = os.environ.get("EXAMPLE_WORKERS", "research,review,write").split(",")
-
-    with run("parallel-agents", runtime=rail, metadata={"example": "parallel_agents"}):
-        with concurrent.futures.ThreadPoolExecutor(max_workers=len(workers)) as pool:
-            results = list(pool.map(worker, workers))
-        event("parallel.all_completed", {"count": len(results)})
-        print(results)
+async def main() -> None:
+    PromptRail.init(
+        api_key=os.environ.get("PROMPTRAIL_API_KEY"),
+        application="parallel-agents-example",
+        export_enabled=bool(os.environ.get("PROMPTRAIL_API_KEY")),
+    )
+    try:
+        async with run(user_id="parallel-example-user"):
+            results = await asyncio.gather(worker("research"), worker("review"), worker("write"))
+            print(results)
+    finally:
+        PromptRail.shutdown()
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())

@@ -81,7 +81,7 @@ def current_user_id() -> str | None:
     try:
         return config.resolve_user_id()
     except Exception as exc:
-        debug(f"user resolver failed: {exc}", enabled=config.debug)
+        debug(f"user resolver failed: {type(exc).__name__}", enabled=config.debug)
         return None
 
 
@@ -162,7 +162,10 @@ class RunContext:
                 callback(self.context)
         except Exception as exc:
             config = _config
-            debug(f"run start callback failed: {exc}", enabled=bool(config and config.debug))
+            debug(
+                f"run start callback failed: {type(exc).__name__}",
+                enabled=bool(config and config.debug),
+            )
 
     def _safe_end(self, exc: BaseException | None) -> None:
         try:
@@ -171,7 +174,10 @@ class RunContext:
                 callback(self.context, exc)
         except Exception as callback_exc:
             config = _config
-            debug(f"run end callback failed: {callback_exc}", enabled=bool(config and config.debug))
+            debug(
+                f"run end callback failed: {type(callback_exc).__name__}",
+                enabled=bool(config and config.debug),
+            )
 
 
 def run(**kwargs: Any) -> RunContext:
@@ -184,6 +190,10 @@ def bind_runtime_context(context: RuntimeContext) -> contextvars.Token[RuntimeCo
 
 def reset_runtime_context(token: contextvars.Token[RuntimeContext | None]) -> None:
     _runtime_context.reset(token)
+
+
+def clear_runtime_context() -> None:
+    _runtime_context.set(None)
 
 
 def ensure_implicit_run() -> RuntimeContext:

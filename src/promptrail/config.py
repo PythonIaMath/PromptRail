@@ -57,7 +57,11 @@ class RuntimeConfig:
             parsed = urlsplit(getattr(self, field_name))
             if parsed.scheme not in {"http", "https"} or not parsed.netloc:
                 raise ValueError(f"{field_name} must be an absolute HTTP(S) URL")
-            if parsed.scheme != "https" and parsed.hostname not in {"localhost", "127.0.0.1", "::1"}:
+            if parsed.scheme != "https" and parsed.hostname not in {
+                "localhost",
+                "127.0.0.1",
+                "::1",
+            }:
                 raise ValueError(f"{field_name} must use HTTPS outside localhost")
         for field_name in (
             "max_attribute_depth",

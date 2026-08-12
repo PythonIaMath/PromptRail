@@ -3,9 +3,11 @@ from __future__ import annotations
 import random
 import threading
 import time
+from contextlib import suppress
 from queue import Empty
 from typing import Any
 
+from ..utils.logging import debug
 from .encoder import BatchJSONEncoder, SerializationError
 from .http import ExportError, HTTPSender
 from .queue import EventQueue
@@ -14,7 +16,13 @@ from .queue import EventQueue
 class ExportWorker:
     """Daemon worker that batches runtime events and exports fail-open."""
 
-    def __init__(self, config: object, queue: EventQueue | None = None, sender: Any | None = None, encoder: BatchJSONEncoder | None = None) -> None:
+    def __init__(
+        self,
+        config: object,
+        queue: EventQueue | None = None,
+        sender: Any | None = None,
+        encoder: BatchJSONEncoder | None = None,
+    ) -> None:
         self.config = config
         self.queue = queue or EventQueue(getattr(config, "max_queue_size", 1024))
         self.sender = sender if sender is not None else HTTPSender(config)
@@ -22,6 +30,7 @@ class ExportWorker:
         self.batch_size = max(1, int(getattr(config, "export_batch_size", 50)))
         self.flush_interval = max(0.01, float(getattr(config, "export_flush_interval", 5.0)))
         self.shutdown_timeout = max(0.0, float(getattr(config, "export_shutdown_timeout", 5.0)))
+        self.max_retries = max(1, int(getattr(config, "max_export_retries", 3)))
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
         self._dropped_serialization = 0
@@ -48,12 +57,12 @@ class ExportWorker:
         self._stop.set()
         if self._thread:
             self._thread.join(self.shutdown_timeout if timeout is None else timeout)
-        deadline = time.monotonic() + (self.shutdown_timeout if timeout is None else max(0.0, timeout))
+        deadline = time.monotonic() + (
+            self.shutdown_timeout if timeout is None else max(0.0, timeout)
+        )
         self._drain_until(deadline)
-        try:
+        with suppress(Exception):
             self.sender.close()
-        except Exception:
-            pass
 
     def _run(self) -> None:
         batch: list[Any] = []
@@ -101,12 +110,18 @@ class ExportWorker:
             self._dropped_serialization += len(batch)
             return
         delay = 0.1
-        while True:
+        attempts = 0
+        while attempts < self.max_retries:
+            attempts += 1
             if deadline is not None and time.monotonic() >= deadline:
                 self._failed_exports += len(batch)
                 return
             try:
                 self.sender.send(body, {"Content-Type": self.encoder.content_type})
+                debug(
+                    f"batch exported: {len(batch)} events",
+                    enabled=bool(getattr(self.config, "debug", False)),
+                )
                 return
             except ExportError as exc:
                 self._failed_exports += len(batch)

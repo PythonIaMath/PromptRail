@@ -2,14 +2,44 @@
 
 from __future__ import annotations
 
+import math
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, Literal
 
 Scalar = str | int | float | bool | None
 _CONTENT_KEY_PARTS = (
-    "prompt", "completion", "message", "messages", "body", "document", "documents",
-    "content", "input", "output", "source", "code", "tool_input", "tool_output", "response",
+    "prompt",
+    "completion",
+    "message",
+    "messages",
+    "body",
+    "document",
+    "documents",
+    "content",
+    "input",
+    "output",
+    "source",
+    "code",
+    "tool_input",
+    "tool_output",
+    "response",
+)
+_SAFE_METADATA_SUFFIXES = (
+    "_chars",
+    "_count",
+    "_duration_ms",
+    "_hash",
+    "_id",
+    "_length",
+    "_mime_type",
+    "_model",
+    "_name",
+    "_size",
+    "_size_bytes",
+    "_status",
+    "_tokens",
+    "_type",
 )
 
 
@@ -38,8 +68,10 @@ class PrivacyPolicy:
     def _allows_key(self, key: str) -> bool:
         if self.mode == "content":
             return True
-        normalized = key.lower().replace("-", "_")
-        return not any(part in normalized for part in _CONTENT_KEY_PARTS)
+        normalized = key.lower().replace("-", "_").replace(".", "_")
+        if not any(part in normalized for part in _CONTENT_KEY_PARTS):
+            return True
+        return normalized.endswith(_SAFE_METADATA_SUFFIXES)
 
     def _sanitize_mapping(
         self, value: Mapping[str, Any], depth: int, budget: _Budget
@@ -61,9 +93,7 @@ class PrivacyPolicy:
                 output[raw_key] = item
         return output
 
-    def _sanitize_sequence(
-        self, value: Sequence[Any], depth: int, budget: _Budget
-    ) -> list[Any]:
+    def _sanitize_sequence(self, value: Sequence[Any], depth: int, budget: _Budget) -> list[Any]:
         if isinstance(value, str | bytes | bytearray) or depth >= self.max_depth:
             return []
         output: list[Any] = []
@@ -78,8 +108,10 @@ class PrivacyPolicy:
     def _sanitize_value(self, value: Any, depth: int, budget: _Budget) -> Any:
         if value is None or isinstance(value, bool):
             return value
-        if isinstance(value, int | float) and not isinstance(value, bool):
+        if isinstance(value, int) and not isinstance(value, bool):
             return value
+        if isinstance(value, float):
+            return value if math.isfinite(value) else _DROP
         if isinstance(value, str):
             return value[: self.max_string_length]
         if isinstance(value, Mapping):

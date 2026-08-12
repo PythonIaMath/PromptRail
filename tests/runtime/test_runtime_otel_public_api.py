@@ -44,7 +44,7 @@ def _install_provider() -> tuple[Any, list[dict[str, Any]]]:
 
 
 def test_traceparent_trace_span_correlation_under_real_otel_spans() -> None:
-    trace = pytest.importorskip("opentelemetry.trace")
+    pytest.importorskip("opentelemetry.trace")
     provider, _ = _install_provider()
     PromptRail.init(gateway_url=GATEWAY, export_enabled=False, enable_opentelemetry=False)
     tracer = provider.get_tracer("promptrail-test")
@@ -59,13 +59,16 @@ def test_traceparent_trace_span_correlation_under_real_otel_spans() -> None:
 
 
 def test_nested_spans_agents_parent_child_headers() -> None:
-    trace = pytest.importorskip("opentelemetry.trace")
+    pytest.importorskip("opentelemetry.trace")
     provider, _ = _install_provider()
     PromptRail.init(gateway_url=GATEWAY, export_enabled=False, enable_opentelemetry=False)
     tracer = provider.get_tracer("promptrail-test-nested")
-    with run(run_id="run_nested"), tracer.start_as_current_span(
-        "agent", attributes={"promptrail.span.kind": "agent"}
-    ) as parent:
+    with (
+        run(run_id="run_nested"),
+        tracer.start_as_current_span(
+            "agent", attributes={"promptrail.span.kind": "agent"}
+        ) as parent,
+    ):
         parent_id = f"{parent.get_span_context().span_id:016x}"
         with tracer.start_as_current_span("tool") as child:
             child_id = f"{child.get_span_context().span_id:016x}"
@@ -78,7 +81,7 @@ def test_nested_spans_agents_parent_child_headers() -> None:
 
 
 def test_parallel_llm_calls_same_run_different_spans() -> None:
-    trace = pytest.importorskip("opentelemetry.trace")
+    pytest.importorskip("opentelemetry.trace")
     provider, events = _install_provider()
     PromptRail.init(gateway_url=GATEWAY, export_enabled=False, enable_opentelemetry=False)
 

@@ -19,13 +19,27 @@ from .classifier import classify_span
 EventCallback = Callable[[dict[str, Any]], None]
 RunCallback = Callable[[str, str], None]
 
-_registered_providers: "WeakSet[Any]" = WeakSet()
+_registered_providers: WeakSet[Any] = WeakSet()
 _registered_provider_ids: set[int] = set()
 _registry_lock = threading.RLock()
 _trace_to_run: dict[str, str] = {}
 _span_to_parent: dict[str, str | None] = {}
 _span_to_trace: dict[str, str] = {}
+_span_to_run: dict[str, str] = {}
+_span_to_user: dict[str, str | None] = {}
 _span_to_run_started: dict[str, bool] = {}
+
+
+def _default_run_id() -> str:
+    try:
+        from promptrail.context import current_run_id
+
+        active = current_run_id()
+        if active:
+            return active
+    except Exception:
+        pass
+    return f"run_{uuid.uuid4().hex}"
 
 
 def _format_trace_id(value: Any) -> str | None:
@@ -74,22 +88,40 @@ def _parent_span_id(span: Any, parent_context: Any = None) -> str | None:
         return None
 
 
-def _event(span: Any, phase: str, trace_id: str, span_id: str, parent_span_id: str | None, run_id: str) -> dict[str, Any]:
+def _event(
+    span: Any,
+    phase: str,
+    trace_id: str,
+    span_id: str,
+    parent_span_id: str | None,
+    run_id: str,
+    user_id: str | None,
+) -> dict[str, Any]:
     attributes = getattr(span, "attributes", None)
     if not isinstance(attributes, Mapping):
         attributes = {}
     status = getattr(span, "status", None)
-    return {
+    span_events = getattr(span, "events", ()) or ()
+    has_error = any(getattr(item, "name", None) == "exception" for item in span_events)
+    start_time = getattr(span, "start_time", None)
+    end_time = getattr(span, "end_time", None)
+    event = {
         "type": "otel.span." + phase,
         "phase": phase,
         "run_id": run_id,
+        "user_id": user_id,
         "trace_id": trace_id,
         "span_id": span_id,
         "parent_span_id": parent_span_id,
         "name": getattr(span, "name", None),
         "kind": classify_span(attributes, getattr(span, "name", None)),
         "status": str(status) if status is not None else None,
+        "has_error": has_error,
+        "attributes": dict(attributes),
     }
+    if isinstance(start_time, int) and isinstance(end_time, int) and end_time >= start_time:
+        event["duration_ms"] = (end_time - start_time) / 1_000_000
+    return event
 
 
 @dataclass(frozen=True, slots=True)
@@ -115,12 +147,16 @@ def current_trace_snapshot() -> TraceSnapshot:
         with _registry_lock:
             parent_span_id = _span_to_parent.get(span_id) if span_id else None
             run_id = _trace_to_run.get(trace_id) if trace_id else None
-        return TraceSnapshot(trace_id=trace_id, span_id=span_id, parent_span_id=parent_span_id, run_id=run_id)
+        return TraceSnapshot(
+            trace_id=trace_id, span_id=span_id, parent_span_id=parent_span_id, run_id=run_id
+        )
     except Exception:
         return TraceSnapshot()
 
 
-def inject_trace_headers(carrier: MutableMapping[str, str] | None = None) -> MutableMapping[str, str]:
+def inject_trace_headers(
+    carrier: MutableMapping[str, str] | None = None,
+) -> MutableMapping[str, str]:
     """Inject standard OTel propagation headers using the configured propagator."""
 
     headers: MutableMapping[str, str] = carrier if carrier is not None else {}
@@ -147,7 +183,7 @@ class PromptRailSpanProcessor:
         self._on_event = on_event
         self._on_run_start = on_run_start
         self._on_run_end = on_run_end
-        self._run_id_factory = run_id_factory or (lambda: uuid.uuid4().hex)
+        self._run_id_factory = run_id_factory or _default_run_id
 
     def on_start(self, span: Any, parent_context: Any | None = None) -> None:
         try:
@@ -158,6 +194,15 @@ class PromptRailSpanProcessor:
                 return
             parent_span_id = _parent_span_id(span, parent_context)
             root = parent_span_id is None
+            active_run_id: str | None = None
+            active_user_id: str | None = None
+            try:
+                from promptrail.context import current_run_id, current_user_id
+
+                active_run_id = current_run_id()
+                active_user_id = current_user_id()
+            except Exception:
+                pass
             with _registry_lock:
                 run_id = _trace_to_run.get(trace_id)
                 run_started = False
@@ -168,13 +213,26 @@ class PromptRailSpanProcessor:
                 elif run_id is None:
                     run_id = self._run_id_factory()
                     _trace_to_run[trace_id] = run_id
+                span_run_id = active_run_id or run_id
                 _span_to_parent[span_id] = parent_span_id
                 _span_to_trace[span_id] = trace_id
+                _span_to_run[span_id] = span_run_id
+                _span_to_user[span_id] = active_user_id
                 _span_to_run_started[span_id] = run_started
             if run_started and self._on_run_start:
                 self._on_run_start(run_id, trace_id)
             if self._on_event:
-                self._on_event(_event(span, "start", trace_id, span_id, parent_span_id, run_id))
+                self._on_event(
+                    _event(
+                        span,
+                        "start",
+                        trace_id,
+                        span_id,
+                        parent_span_id,
+                        span_run_id,
+                        active_user_id,
+                    )
+                )
         except Exception:
             return
 
@@ -186,7 +244,9 @@ class PromptRailSpanProcessor:
             if not trace_id or not span_id:
                 return
             with _registry_lock:
-                run_id = _trace_to_run.get(trace_id) or self._run_id_factory()
+                run_id = _span_to_run.pop(span_id, None)
+                run_id = run_id or _trace_to_run.get(trace_id) or self._run_id_factory()
+                user_id = _span_to_user.pop(span_id, None)
                 parent_span_id = _span_to_parent.get(span_id)
                 run_started = _span_to_run_started.pop(span_id, False)
                 _span_to_parent.pop(span_id, None)
@@ -194,11 +254,26 @@ class PromptRailSpanProcessor:
                 if run_started:
                     _trace_to_run.pop(trace_id, None)
             if self._on_event:
-                self._on_event(_event(span, "end", trace_id, span_id, parent_span_id, run_id))
+                self._on_event(
+                    _event(
+                        span,
+                        "end",
+                        trace_id,
+                        span_id,
+                        parent_span_id,
+                        run_id,
+                        user_id,
+                    )
+                )
             if run_started and self._on_run_end:
                 self._on_run_end(run_id, trace_id)
         except Exception:
             return
+
+    def _on_ending(self, span: Any) -> None:
+        """OpenTelemetry 1.44 pre-end hook. PromptRail has no synchronous work here."""
+
+        return None
 
     def shutdown(self) -> None:  # SDK compatibility
         return None
@@ -236,7 +311,9 @@ def install_promptrail_span_processor(
         with _registry_lock:
             if provider in _registered_providers or id(provider) in _registered_provider_ids:
                 return None
-            processor = PromptRailSpanProcessor(on_event=on_event, on_run_start=on_run_start, on_run_end=on_run_end)
+            processor = PromptRailSpanProcessor(
+                on_event=on_event, on_run_start=on_run_start, on_run_end=on_run_end
+            )
             provider.add_span_processor(processor)
             try:
                 _registered_providers.add(provider)

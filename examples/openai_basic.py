@@ -1,38 +1,42 @@
-"""Basic OpenAI call correlated with a PromptRail runtime run.
-
-Set OPENAI_API_KEY in your environment before running. This example records
-runtime correlation metadata only. It does not tune prompts, cache requests, or
-change client-side behavior for optimization.
-"""
+"""Send one OpenAI-compatible request through the PromptRail gateway."""
 
 from __future__ import annotations
 
 import os
 
-from promptrail import PromptRail, current_runtime_context, event, run, wrap_openai
+from promptrail import PromptRail, current_runtime_context, run, wrap_openai
 
 
 def main() -> None:
-    if not os.environ.get("OPENAI_API_KEY"):
-        raise SystemExit("Set OPENAI_API_KEY to run this example.")
+    api_key = os.environ.get("PROMPTRAIL_API_KEY")
+    if not api_key:
+        raise SystemExit("Set PROMPTRAIL_API_KEY to run this example.")
 
     try:
         from openai import OpenAI
     except ImportError as exc:  # pragma: no cover - optional example dependency
-        raise SystemExit("Install the optional dependency: pip install openai") from exc
+        raise SystemExit(
+            'Install the optional dependency: pip install "promptrail[openai]"'
+        ) from exc
 
-    rail = PromptRail(project=os.environ.get("PROMPTRAIL_PROJECT", "examples"))
-    client = wrap_openai(OpenAI(), runtime=rail)
+    PromptRail.init(
+        api_key=api_key,
+        application="openai-basic-example",
+        environment=os.environ.get("PROMPTRAIL_ENVIRONMENT", "development"),
+        user_id=lambda: os.environ.get("EXAMPLE_USER_ID", "example-user"),
+    )
+    client = wrap_openai(OpenAI(base_url="https://api.promptrail.ai/v1", api_key=api_key))
 
-    with run("openai-basic", runtime=rail, metadata={"example": "openai_basic"}):
-        event("example.started", {"client": "openai"})
-        response = client.chat.completions.create(
-            model=os.environ.get("OPENAI_MODEL", "gpt-4o-mini"),
-            messages=[{"role": "user", "content": "Say hello in one short sentence."}],
-        )
-        ctx = current_runtime_context()
-        event("example.completed", {"run_id": getattr(ctx, "run_id", None)})
-        print(response.choices[0].message.content)
+    try:
+        with run():
+            response = client.chat.completions.create(
+                model=os.environ.get("PROMPTRAIL_MODEL", "gpt-4o-mini"),
+                messages=[{"role": "user", "content": "Say hello in one short sentence."}],
+            )
+            print(current_runtime_context())
+            print(response.choices[0].message.content)
+    finally:
+        PromptRail.shutdown()
 
 
 if __name__ == "__main__":
