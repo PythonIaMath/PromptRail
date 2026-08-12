@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+
 import pytest
 
 from promptrail import TraceSource, TraceSourceConfiguration, import_historical_traces
