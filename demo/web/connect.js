@@ -10,6 +10,12 @@ const toast = document.querySelector("#toast");
 const uploadZone = document.querySelector("#upload-zone");
 const fileInput = document.querySelector("#file-input");
 const browseButton = document.querySelector("#browse-button");
+let activeSource = null;
+let sdkCapabilities = null;
+const sourceIds = {
+  "Custom API": "custom",
+  OpenTelemetry: "opentelemetry",
+};
 
 function selectTab(name) {
   tabs.forEach((tab) => {
@@ -21,6 +27,7 @@ function selectTab(name) {
 }
 
 function openDrawer(provider, color = "#111827") {
+  activeSource = sourceIds[provider] || provider.toLowerCase();
   drawerTitle.textContent = provider;
   drawerLogo.textContent = provider === "OpenTelemetry" ? "◫" : provider.charAt(0);
   drawerLogo.style.background = color;
@@ -45,7 +52,7 @@ function showToast(title, detail) {
   window.setTimeout(() => toast.classList.remove("show"), 4200);
 }
 
-function importFiles(files) {
+async function importFiles(files) {
   const file = files?.[0];
   if (!file) return;
   const validName = /\.(json|jsonl)$/i.test(file.name);
@@ -58,9 +65,27 @@ function importFiles(files) {
     return;
   }
   uploadZone.querySelector("h3").textContent = file.name;
-  uploadZone.querySelector("p").textContent = `${(file.size / 1024).toFixed(1)} KB · Ready to import`;
-  uploadZone.querySelector(".upload-icon").textContent = "✓";
-  showToast("Trace data ready", "Schema detected. Historical import can begin.");
+  uploadZone.querySelector("p").textContent = `${(file.size / 1024).toFixed(1)} KB · Normalizing with PromptRail SDK…`;
+  try {
+    const response = await fetch("/api/traces/import", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-PromptRail-Privacy-Mode": "metadata_only",
+      },
+      body: file,
+    });
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload.error || "Trace import failed");
+    const summary = payload.import;
+    uploadZone.querySelector("p").textContent = `${summary.accepted_events} events · ${summary.run_count} runs · ${summary.llm_call_count} LLM calls`;
+    uploadZone.querySelector(".upload-icon").textContent = "✓";
+    showToast("Trace data imported", `${summary.source_format} normalized to SDK schema ${summary.schema_version}.`);
+  } catch (error) {
+    uploadZone.querySelector("p").textContent = "Import failed. Check the trace structure and try again.";
+    uploadZone.querySelector(".upload-icon").textContent = "!";
+    showToast("Trace import failed", error.message);
+  }
 }
 
 tabs.forEach((tab) => tab.addEventListener("click", () => selectTab(tab.dataset.tab)));
@@ -74,17 +99,32 @@ document.addEventListener("keydown", (event) => {
   if (event.key === "Escape" && drawer.classList.contains("open")) closeDrawer();
 });
 
-connectionForm.addEventListener("submit", (event) => {
+connectionForm.addEventListener("submit", async (event) => {
   event.preventDefault();
   const button = connectionForm.querySelector(".connect-button span");
-  button.textContent = "Testing connection…";
-  window.setTimeout(() => {
-    button.textContent = "Test & connect";
+  button.textContent = "Validating with SDK…";
+  try {
+    const response = await fetch("/api/trace-sources/connect", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        source: activeSource,
+        credential: document.querySelector("#api-key").value,
+        project: document.querySelector("#project-name").value,
+        metadata_only: connectionForm.querySelector('input[type="checkbox"]').checked,
+      }),
+    });
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload.error || "Connection validation failed");
+    button.textContent = "Validate configuration";
     closeDrawer();
     connectionForm.reset();
     connectionForm.querySelector('input[type="checkbox"]').checked = true;
-    showToast(`${drawerTitle.textContent} connected`, "Historical sync has started.");
-  }, 900);
+    showToast(`${drawerTitle.textContent} configured`, `SDK schema ${payload.connection.sdk.schema_version} is ready. Remote sync is pending.`);
+  } catch (error) {
+    button.textContent = "Validate configuration";
+    showToast("Configuration failed", error.message);
+  }
 });
 
 browseButton.addEventListener("click", (event) => {
@@ -105,3 +145,18 @@ fileInput.addEventListener("change", () => importFiles(fileInput.files));
   uploadZone.classList.remove("dragging");
 }));
 uploadZone.addEventListener("drop", (event) => importFiles(event.dataTransfer.files));
+
+async function loadSdkCapabilities() {
+  try {
+    const response = await fetch("/api/trace-sources", { cache: "no-store" });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    sdkCapabilities = await response.json();
+    const note = document.querySelector(".secure-note");
+    note.textContent = `⌾ SDK schema ${sdkCapabilities.sdk.schema_version} · ${sdkCapabilities.sdk.trace_processor}`;
+  } catch (error) {
+    document.querySelector(".secure-note").textContent = "SDK connection unavailable";
+    showToast("SDK unavailable", error.message);
+  }
+}
+
+loadSdkCapabilities();

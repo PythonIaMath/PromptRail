@@ -14,6 +14,12 @@ from .errors import (
     RoutingError,
 )
 from .gateway import PromptRailGateway
+from .historical import (
+    HistoricalImportResult,
+    TraceSource,
+    TraceSourceConfiguration,
+    import_historical_traces,
+)
 from .integrations import async_httpx_request_hook, httpx_request_hook, wrap_openai
 from .models import (
     CallBudget,
@@ -46,6 +52,7 @@ __all__ = [
     "EnterprisePolicyAgent",
     "EventType",
     "GlobalController",
+    "HistoricalImportResult",
     "IntegrationError",
     "LeRouterHTTPRanker",
     "LeRouterPolicyGenerator",
@@ -68,6 +75,8 @@ __all__ = [
     "SuppliedLeRouterRanker",
     "SuppliedPolicyAgent",
     "TaskRule",
+    "TraceSource",
+    "TraceSourceConfiguration",
     "async_httpx_request_hook",
     "copy_context",
     "current_run_id",
@@ -77,6 +86,7 @@ __all__ = [
     "event",
     "httpx_request_hook",
     "inject_headers",
+    "import_historical_traces",
     "run",
     "submit_with_context",
     "wrap_openai",

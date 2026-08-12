@@ -101,16 +101,16 @@
   <aside class="drawer" id="drawer" aria-hidden="true" aria-label="Connect trace provider">
     <button class="drawer-close" id="drawer-close" aria-label="Close">×</button>
     <div class="drawer-provider"><span class="provider-logo" id="drawer-logo">L</span><span><small>CONNECT SOURCE</small><strong id="drawer-title">LangSmith</strong></span></div>
-    <div class="drawer-copy"><h2>Bring your execution history into PromptRail.</h2><p>We use read-only access to learn call patterns, model behavior, cost, and latency. Your credentials never leave the encrypted control plane.</p></div>
+    <div class="drawer-copy"><h2>Prepare your execution history for PromptRail.</h2><p>Validate a read-only source configuration against the SDK contract. Remote provider sync remains pending until its control-plane connector is deployed.</p></div>
     <form id="connection-form">
       <label>API key<input id="api-key" type="password" placeholder="••••••••••••••••••••" required autocomplete="off" /><span>Read-only credentials recommended</span></label>
       <label>Project or workspace <input id="project-name" type="text" placeholder="production-agent" required /></label>
       <label class="checkbox"><input type="checkbox" checked /><span><b>Exclude prompt and response content</b><small>Only import metadata, usage, timing, and relationships.</small></span></label>
-      <button class="connect-button" type="submit"><span>Test & connect</span><b>→</b></button>
+      <button class="connect-button" type="submit"><span>Validate configuration</span><b>→</b></button>
     </form>
-    <div class="drawer-footer">By connecting, you allow PromptRail to perform an initial historical sync and observe new traces.</div>
+    <div class="drawer-footer">Credentials are validated for shape only in this SDK preview and are never persisted by the demo server.</div>
   </aside>
 
-  <div class="toast" id="toast" role="status"><span>✓</span><div><strong>Trace source connected</strong><small>Historical sync has started.</small></div></div>
+  <div class="toast" id="toast" role="status"><span>✓</span><div><strong>Trace source configured</strong><small>SDK contract validated.</small></div></div>
 </body>
 </html>
