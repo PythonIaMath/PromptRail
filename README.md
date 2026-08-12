@@ -77,7 +77,7 @@ context compaction, cache management, reasoning control, and budget allocation
 remain in the existing server-side systems.
 
 ```bash
-pip install "promptrail[opentelemetry,openai]"
+pip install "promptrail[runtime]"
 ```
 
 ```python
@@ -121,6 +121,22 @@ with run(user_id="tenant_3:user_81"):
 Runtime events are queued to a bounded background exporter, batched, retried, and
 flushed at shutdown. Instrumentation and export failures are fail-open. Telemetry
 defaults to `metadata_only`; raw content capture requires `capture_content=True`.
+
+The SDK can also normalize PromptRail event batches, JSONL, generic span exports,
+and OpenTelemetry JSON into the canonical runtime event schema:
+
+```python
+from pathlib import Path
+
+from promptrail import import_historical_traces
+
+history = import_historical_traces(Path("traces.jsonl").read_bytes())
+print(history.summary())
+```
+
+Remote LangSmith, Langfuse, Braintrust, and Helicone connectors are still under
+construction. Source configuration is validated today, but remote synchronization
+does not begin until the corresponding control-plane connector is deployed.
 
 See [the Runtime SDK guide](docs/runtime-sdk.md),
 [architecture](docs/runtime-sdk-architecture.md), and

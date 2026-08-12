@@ -1,117 +1,221 @@
-# PromptRail Runtime Event Schema 1.0
+# PromptRail Runtime Event Schema
 
-Runtime events use a deliberately small, versioned JSON schema. They describe current execution structure and metadata, not historical analytics or raw application payloads.
+PromptRail runtime events use schema version `1.0`. Live SDK observation and historical trace imports produce the same canonical event structure.
 
-## Envelope
+## Batch request
 
-The runtime endpoint accepts:
+The runtime exporter sends events as a JSON object:
 
 ```json
 {
   "events": [
     {
       "schema_version": "1.0",
-      "event_id": "evt_01J...",
-      "run_id": "run_01J...",
-      "user_id": "tenant_3:user_81",
-      "trace_id": "4bf92f3577b34da6a3ce929d0e0e4736",
-      "span_id": "00f067aa0ba902b7",
-      "parent_span_id": "b7ad6b7169203331",
-      "type": "tool.end",
-      "name": "search_repository",
-      "timestamp_ms": 1786550400000,
+      "event_id": "evt_01...",
+      "run_id": "run_01...",
+      "user_id": "customer_123",
+      "trace_id": "0123456789abcdef0123456789abcdef",
+      "span_id": "0123456789abcdef",
+      "parent_span_id": null,
+      "type": "llm.end",
+      "name": "responses.create",
+      "timestamp_ms": 1720000000000,
       "status": "success",
       "attributes": {
-        "tool.name": "search_repository",
-        "duration_ms": 921,
-        "input_size_bytes": 310,
-        "output_size_bytes": 18431,
-        "promptrail.application": "coding-agent",
-        "promptrail.environment": "production"
+        "gen_ai.system": "openai",
+        "gen_ai.request.model": "gpt-4o-mini",
+        "input_tokens": 420,
+        "output_tokens": 88,
+        "duration_ms": 730
       }
     }
   ]
 }
 ```
 
-## Fields
-
-| Field | Type | Required | Meaning |
-| --- | --- | --- | --- |
-| `schema_version` | string | yes | Event contract version. MVP value is `1.0`. |
-| `event_id` | string | yes | Unique event ID generated locally. |
-| `run_id` | string | yes | Complete end-user request or agent execution. |
-| `user_id` | string or null | yes | Stable enterprise-provided identifier, not required to be PII. |
-| `trace_id` | string or null | yes | Lowercase 32-character OpenTelemetry trace ID when available. |
-| `span_id` | string or null | yes | Lowercase 16-character current span ID when available. |
-| `parent_span_id` | string or null | yes | Lowercase 16-character direct parent span ID when available. |
-| `type` | string | yes | Canonical lifecycle type or manual escape-hatch type. |
-| `name` | string or null | yes | Bounded operation name. |
-| `timestamp_ms` | integer | yes | Unix epoch milliseconds. |
-| `status` | string or null | yes | Normalized status such as `success`, `error`, `unset`, or `cancelled`. |
-| `attributes` | object | yes | Sanitized, bounded scalar/list/map metadata. |
-
-## Initial canonical event types
-
-```text
-run.start
-run.end
-agent.start
-agent.end
-tool.start
-tool.end
-retrieval.start
-retrieval.end
-llm.start
-llm.end
-branch.start
-branch.end
-error
-```
-
-OpenTelemetry spans that cannot be classified safely use `other.start` and `other.end`. A generic root workflow span uses `workflow.start` and `workflow.end`. The manual event API may send namespaced strings such as `workflow.stage`.
-
-## Span classification
-
-Classification precedence is:
-
-1. Explicit PromptRail attributes such as `promptrail.span.type`.
-2. OpenTelemetry semantic attributes including `gen_ai.*`, `tool.*`, `retrieval.*`, and workflow/agent attributes.
-3. Standard span kind and bounded, conservative name hints.
-4. `other` when uncertain.
-
-String matching never overrides contradictory explicit or semantic metadata.
-
-## Metadata-only privacy mode
-
-`metadata_only` is the default. The sanitizer:
-
-- drops known prompt, completion, message, body, document, tool input/output, source-code, and content keys
-- retains scalar operational metadata, identifiers, sizes, counts, durations, status, model names, provider names, and workflow stages
-- truncates strings and collections to configured bounds
-- converts no arbitrary objects through `repr`, pickling, dataclass traversal, or model serialization
-
-`content` mode permits explicitly supplied string/list/map content subject to the same structural limits. It does not alter what the PromptRail gateway may process for the live inference request.
-
-## Gateway correlation headers
-
-The SDK sends the current identity synchronously with a PromptRail gateway request:
+Default ingestion endpoint:
 
 ```http
-traceparent: 00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01
-x-promptrail-run-id: run_01J...
-x-promptrail-user-id: tenant_3:user_81
-x-promptrail-trace-id: 4bf92f3577b34da6a3ce929d0e0e4736
-x-promptrail-span-id: 00f067aa0ba902b7
-x-promptrail-parent-span-id: b7ad6b7169203331
-x-promptrail-application: coding-agent
-x-promptrail-environment: production
-x-promptrail-schema-version: 1.0
-x-promptrail-sdk-version: 0.1.0
+POST /v1/runtime/events
+Content-Type: application/json
+Authorization: Bearer <PROMPTRAIL_API_KEY>
+Content-Encoding: gzip
 ```
 
-Optional values are omitted. The gateway must strip private `x-promptrail-*` metadata before forwarding to model providers.
+`Content-Encoding` is present only when compression is enabled and useful for the payload size.
 
-## Compatibility
+## Event fields
 
-New optional fields may be added within schema 1.x. A breaking rename, meaning change, or required-field change requires a new major schema version. The server should retain SDK-version-aware ingestion and ignore unknown attributes.
+| Field | Type | Required | Notes |
+| --- | --- | --- | --- |
+| `schema_version` | string | yes | Currently `1.0`. |
+| `event_id` | string | yes | Unique event identifier used for backend deduplication. |
+| `run_id` | string | yes | PromptRail execution boundary. |
+| `user_id` | string or null | no | Stable application user or tenant identity. |
+| `trace_id` | string or null | no | 32-character lowercase OpenTelemetry trace ID when available. |
+| `span_id` | string or null | no | 16-character lowercase OpenTelemetry span ID when available. |
+| `parent_span_id` | string or null | no | Parent span ID when available. |
+| `type` | string | yes | Canonical type or a custom non-empty type, maximum 128 characters. |
+| `name` | string or null | no | Operation name, maximum 512 characters. |
+| `timestamp_ms` | integer | yes | Unix epoch timestamp in milliseconds. |
+| `status` | string or null | no | Status text, maximum 64 characters. |
+| `attributes` | object | yes | Privacy-filtered operational metadata. |
+
+## Canonical event types
+
+| Type | Meaning |
+| --- | --- |
+| `run.start` | A PromptRail run began. |
+| `run.end` | A PromptRail run ended. |
+| `agent.start` | An agent operation began. |
+| `agent.end` | An agent operation ended. |
+| `tool.start` | A tool call began. |
+| `tool.end` | A tool call ended. |
+| `retrieval.start` | Retrieval began. |
+| `retrieval.end` | Retrieval ended. |
+| `llm.start` | An LLM operation began. |
+| `llm.end` | An LLM operation ended. |
+| `branch.start` | A branch or route began. |
+| `branch.end` | A branch or route ended. |
+| `workflow.start` | A workflow stage began. |
+| `workflow.end` | A workflow stage ended. |
+| `other.start` | An unclassified operation began. |
+| `other.end` | An unclassified operation ended. |
+| `error` | An error occurred outside a paired end event. |
+
+Custom event strings are accepted when they are non-empty. Use canonical types where possible so analysis can group equivalent work across frameworks.
+
+## Attribute conventions
+
+PromptRail classifies spans from stable semantic attributes before checking span names.
+
+### LLM
+
+```json
+{
+  "gen_ai.system": "openai",
+  "gen_ai.operation.name": "chat",
+  "gen_ai.request.model": "gpt-4o-mini",
+  "input_tokens": 420,
+  "output_tokens": 88,
+  "duration_ms": 730
+}
+```
+
+### Tool
+
+```json
+{
+  "promptrail.span.type": "tool",
+  "tool.name": "search_repository",
+  "tool.call.id": "call_123",
+  "output_size_bytes": 2048,
+  "duration_ms": 51
+}
+```
+
+### Retrieval
+
+```json
+{
+  "promptrail.span.type": "retrieval",
+  "db.system": "pinecone",
+  "vector.top_k": 10,
+  "document_count": 8,
+  "duration_ms": 94
+}
+```
+
+### Agent, workflow, and branch
+
+```json
+{
+  "agent.name": "planner",
+  "workflow.name": "answer-ticket",
+  "branch.name": "billing-route"
+}
+```
+
+## Privacy rules
+
+`metadata_only` is the default SDK policy. It removes values associated with:
+
+- prompts and completions
+- messages and response content
+- documents and source code
+- request and response bodies
+- tool input and tool output
+
+Operational suffixes remain allowed when they describe metadata rather than content. Examples include `_id`, `_name`, `_model`, `_tokens`, `_count`, `_duration_ms`, `_size_bytes`, `_hash`, and `_status`.
+
+Default attribute bounds:
+
+| Bound | Value |
+| --- | ---: |
+| Maximum nested depth | 4 |
+| Maximum items per mapping or sequence | 50 |
+| Maximum string length | 2,048 characters |
+| Maximum total attributes | 200 |
+
+Unsupported objects and non-finite floating-point values are dropped.
+
+## Historical input mapping
+
+`import_historical_traces(...)` also accepts common historical structures.
+
+### PromptRail batch
+
+```json
+{"events": [{"run_id": "run_1", "type": "llm.end"}]}
+```
+
+### Generic spans
+
+```json
+{
+  "spans": [
+    {
+      "trace_id": "abc",
+      "span_id": "def",
+      "name": "openai chat",
+      "attributes": {"gen_ai.system": "openai"}
+    }
+  ]
+}
+```
+
+### OpenTelemetry JSON
+
+The importer reads spans from `resourceSpans[].scopeSpans[].spans[]`. It also accepts the older `instrumentationLibrarySpans` key.
+
+OpenTelemetry identifiers may use `traceId`, `spanId`, and `parentSpanId`. Nanosecond `endTimeUnixNano` values are converted to `timestamp_ms`.
+
+### JSONL
+
+Each non-empty line must contain one JSON object:
+
+```jsonl
+{"trace_id":"abc","span_id":"def","name":"openai chat","attributes":{"gen_ai.system":"openai"}}
+{"trace_id":"abc","span_id":"123","name":"search","attributes":{"tool.name":"search"}}
+```
+
+## Validation behavior
+
+The historical importer raises `ValueError` for:
+
+- empty input
+- inputs larger than 50 MB when passed as `bytes` or `str`
+- malformed JSON or JSONL
+- JSONL lines that are not objects
+- unsupported top-level structures
+- event or span collections without objects
+- OpenTelemetry payloads without spans
+
+## Versioning
+
+Consumers should read `schema_version` and tolerate unknown optional attributes. A future breaking wire-format change will use a new schema version rather than silently changing `1.0` semantics.
+
+## Related documentation
+
+- [Python SDK guide](runtime-sdk.md)
+- [Runtime SDK architecture](runtime-sdk-architecture.md)
