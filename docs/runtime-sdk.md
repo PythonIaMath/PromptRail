@@ -499,7 +499,9 @@ The exporter:
 - sends `Authorization: Bearer <api_key>` when configured
 - identifies itself as `promptrail-python/<sdk-version>`
 
-The event transport is at-most-once. The backend deduplicates accepted events by `event_id`.
+Event delivery is best-effort and uses no durable local queue. A retry can resend an event if
+the server accepted a request but the client did not receive the response. Every event carries a
+stable `event_id` so ingestion services can deduplicate retries.
 
 ## Failure model
 
