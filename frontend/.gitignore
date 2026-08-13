@@ -1,0 +1,16 @@
+.next/
+node_modules/
+out/
+app/lib/promptrail-cli/
+.env*.local
+.auth-email-links.log
+lerouter.sqlite
+lerouter.sqlite-*
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+.vercel/
+.env.local
+.env*
+!.env.example

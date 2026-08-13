@@ -1,0 +1,7 @@
+name: lerouter-user-managed
+version: "0.1.0"
+description: "User-managed LeRouter middleware for Hermes native provider execution."
+author: LeRouter
+hooks:
+  - on_session_start
+  - on_session_end

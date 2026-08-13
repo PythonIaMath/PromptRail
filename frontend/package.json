@@ -1,0 +1,35 @@
+{
+  "name": "promptrail-frontend",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "next dev --webpack --port 3001",
+    "predev": "node scripts/package-promptrail-cli.mjs",
+    "prebuild": "node scripts/package-promptrail-cli.mjs",
+    "audit:production": "npm audit --omit=dev --audit-level=high",
+    "build": "next build",
+    "check": "npm test && npm run build",
+    "start": "next start",
+    "test": "node --test app/lib/*.test.mjs app/privacy/page.test.mjs packages/promptrail-cli/test/*.test.mjs",
+    "test:cli": "node --test packages/promptrail-cli/test/*.test.mjs",
+    "test:installation": "node --test app/lib/installation.test.mjs"
+  },
+  "dependencies": {
+    "@datafast/ai-crawl": "^1.0.6",
+    "better-auth": "^1.6.25",
+    "gsap": "^3.15.0",
+    "mongodb": "^7.3.0",
+    "next": "16.2.12",
+    "nodemailer": "^9.0.3",
+    "react": "19.2.6",
+    "react-dom": "19.2.6",
+    "recharts": "^3.9.0",
+    "stripe": "^22.2.1",
+    "three": "^0.184.0"
+  },
+  "overrides": {
+    "postcss": "8.5.23",
+    "sharp": "0.35.3"
+  }
+}

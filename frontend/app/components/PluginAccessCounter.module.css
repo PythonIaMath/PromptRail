@@ -1,0 +1,175 @@
+.counter {
+  display: grid;
+  width: min(100%, 520px);
+  padding: 22px 24px;
+  gap: 14px;
+  border: 1px solid rgba(79, 187, 255, 0.25);
+  background: rgba(79, 187, 255, 0.055);
+}
+
+.loading {
+  min-height: 116px;
+  animation: pulse 1.2s ease-in-out infinite alternate;
+}
+
+.cornerCount {
+  position: absolute;
+  z-index: 2;
+  top: 94px;
+  right: max(24px, calc((100% - 1180px) / 2));
+  margin: 0;
+  background: linear-gradient(
+    100deg,
+    #8f8f8f 0%,
+    #8f8f8f 34%,
+    #ffffff 49%,
+    #ffb34d 57%,
+    #8f8f8f 72%,
+    #8f8f8f 100%
+  );
+  background-size: 300% 100%;
+  background-clip: text;
+  color: transparent;
+  font-size: 1.35rem;
+  font-weight: 780;
+  animation: corner-count-shimmer 2.4s linear infinite;
+}
+
+@keyframes corner-count-shimmer {
+  from {
+    background-position: 100% 50%;
+  }
+
+  to {
+    background-position: -200% 50%;
+  }
+}
+
+.counterCopy {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+}
+
+.counterCopy span,
+.accessLabel {
+  color: #737373;
+  font-size: 0.72rem;
+  font-weight: 760;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.counterCopy strong,
+.accessStatus strong {
+  color: #f1f1f1;
+  font-size: 0.92rem;
+}
+
+.counter p {
+  margin: 0;
+  color: #888888;
+  font-size: 0.78rem;
+  line-height: 1.55;
+}
+
+.meter {
+  overflow: hidden;
+  height: 4px;
+  background: rgba(255, 255, 255, 0.09);
+}
+
+.meter i {
+  display: block;
+  height: 100%;
+  background: var(--plugin-blue);
+  transition: width 280ms ease;
+}
+
+.error,
+.billingNotice {
+  margin: 0;
+  color: #9b9b9b;
+  font-size: 0.8rem;
+}
+
+.accessStatus {
+  display: grid;
+  margin: 0;
+  padding: 0 0 26px;
+  gap: 20px;
+  border-bottom: 1px solid var(--plugin-line);
+}
+
+.accessCopy {
+  display: grid;
+  gap: 9px;
+}
+
+.accessActions {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 18px;
+}
+
+.accessActions .meter {
+  width: min(180px, 32vw);
+}
+
+.accessActions :global(.plugin-button) {
+  width: 100%;
+  min-height: 42px;
+  padding: 0 14px;
+  font-size: 0.76rem;
+}
+
+.billingNotice {
+  margin: 18px 0 0;
+  border-left: 2px solid rgba(255, 179, 77, 0.52);
+  padding-left: 12px;
+  line-height: 1.55;
+}
+
+@keyframes pulse {
+  from { opacity: 0.45; }
+  to { opacity: 0.9; }
+}
+
+@media (max-width: 960px) {
+  .accessActions {
+    width: 100%;
+  }
+}
+
+@media (max-width: 700px) {
+  .cornerCount {
+    top: 82px;
+    right: 16px;
+    font-size: 1rem;
+  }
+
+  .counter {
+    padding: 18px;
+  }
+
+  .accessStatus {
+    padding-bottom: 22px;
+  }
+
+  .counterCopy {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 6px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cornerCount {
+    background: none;
+    color: #ffb34d;
+    animation: none;
+  }
+}
