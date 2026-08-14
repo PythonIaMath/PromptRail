@@ -5785,9 +5785,10 @@ h1 {
 }
 
 .landing-page-enterprise .hero {
-    width: min(1280px, calc(100% - 64px));
+    width: 100%;
     align-items: stretch;
-    padding: clamp(118px, 15vh, 164px) 0 clamp(76px, 10vh, 112px);
+    padding: clamp(118px, 15vh, 164px) max(32px, calc((100% - 1280px) / 2))
+        clamp(76px, 10vh, 112px);
     text-align: left;
 }
 
@@ -6522,7 +6523,9 @@ h1 {
 
 @media (max-width: 980px) {
     .landing-page-enterprise .hero {
-        width: min(720px, calc(100% - 40px));
+        width: 100%;
+        padding-right: 20px;
+        padding-left: 20px;
         padding-top: 118px;
     }
 
@@ -6656,9 +6659,10 @@ h1 {
 
 @media (max-width: 620px) {
     .landing-page-enterprise .hero {
-        width: min(100% - 32px, 520px);
+        width: 100%;
+        min-height: 100vh;
         min-height: 100dvh;
-        padding: 96px 0 64px;
+        padding: 96px 16px 64px;
     }
 
     .landing-page-enterprise .enterprise-hero-copy h1 {
