@@ -1033,20 +1033,13 @@ function FastSetupSection({ enterprise = false }) {
 }
 
 export default function LandingPage() {
-  const heroRef = useRef(null);
-  const inkPathRef = useRef(null);
   const signupButtonRef = useRef(null);
   const signupPathRef = useRef(null);
-  const canShowEnterpriseMode = process.env.NODE_ENV === "development";
-  const [isEnterpriseMode, setIsEnterpriseMode] = useState(false);
   const [isWaitlistOpen, setIsWaitlistOpen] = useState(false);
   const [waitlistEmail, setWaitlistEmail] = useState("");
   const [waitlistStatus, setWaitlistStatus] = useState("idle");
   const [waitlistMessage, setWaitlistMessage] = useState("");
-  const effectiveEnterpriseMode = canShowEnterpriseMode && isEnterpriseMode;
-
   useHeroBackgroundMotion();
-  useHeadlineInkScroll(heroRef, inkPathRef, !effectiveEnterpriseMode);
   useLiquidSignupButton(signupButtonRef, signupPathRef);
 
   function openWaitlist() {
@@ -1101,74 +1094,19 @@ export default function LandingPage() {
   }
 
   return (
-    <main className={`landing-page${effectiveEnterpriseMode ? " landing-page-enterprise" : ""}`}>
+    <main className="landing-page landing-page-enterprise">
       <a className="landing-brand-mark" href="/" aria-label="PromptRail home">
         <img src="/PromptRail-logo.png" alt="" aria-hidden="true" />
         <span>PromptRail</span>
       </a>
-      {canShowEnterpriseMode ? (
-        <button
-          className="landing-mode-toggle"
-          type="button"
-          aria-pressed={isEnterpriseMode}
-          onClick={() => setIsEnterpriseMode((current) => !current)}
-        >
-          Entreprise
-        </button>
-      ) : null}
       <HeroBackgroundImage />
-      <section className="hero" ref={heroRef}>
-        {effectiveEnterpriseMode ? (
-          <div className="enterprise-hero-grid">
-            <div className="enterprise-hero-copy">
-              <h1>
-                <span>Save 70% on token costs</span>
-                <span>without your users noticing.</span>
-              </h1>
-              <div className="hero-actions" aria-label="Primary actions">
-                <button
-                  className="liquid-signup-button"
-                  type="button"
-                  ref={signupButtonRef}
-                  onClick={openWaitlist}
-                >
-                  <svg className="liquid-signup-bg" viewBox="0 0 232 64" aria-hidden="true">
-                    <path ref={signupPathRef} d={`${BASE_SIGNUP_BUTTON_PATH} Z`} />
-                  </svg>
-                  <span>Join The Waitlist</span>
-                </button>
-              </div>
-            </div>
-          </div>
-        ) : (
-          <>
+      <section className="hero">
+        <div className="enterprise-hero-grid">
+          <div className="enterprise-hero-copy">
             <h1>
-              <span>
-                Stop{" "}
-                <span className="headline-crossed">
-                  overpaying
-                  <svg
-                    className="headline-ink"
-                    viewBox="40 0 300 104"
-                    preserveAspectRatio="none"
-                    aria-hidden="true"
-                  >
-                    <path
-                      ref={inkPathRef}
-                      d="M 53 67 C 60 61 74 53 74 54 C 82 53 86 58 92 58 C 98 58 104 44 112 34 C 120 24 126 21 131 26 C 136 31 133 47 128 63 C 124 76 122 88 127 91 C 132 94 138 84 144 72 C 151 58 159 40 168 25 C 176 13 184 8 189 12 C 194 16 191 34 187 54 C 183 71 179 89 183 93 C 188 97 194 88 201 76 C 209 61 218 41 229 24 C 238 10 247 5 252 10 C 257 15 255 35 251 58 C 248 75 246 88 251 91 C 256 94 262 85 267 74 C 272 63 276 56 281 56 C 286 56 289 68 294 68 C 299 68 302 56 307 56 C 312 56 314 61 318 63"
-                    />
-                  </svg>
-                </span>
-              </span>
-              <span>your token</span>
+              <span>Save 70% on token costs</span>
+              <span>without your users noticing.</span>
             </h1>
-            <p className="support">
-              <span>
-                A routing <strong>plugin</strong> for <strong>Hermes</strong> and{" "}
-                <strong>OpenClaw</strong> agents.
-              </span>
-            </p>
-
             <div className="hero-actions" aria-label="Primary actions">
               <button
                 className="liquid-signup-button"
@@ -1182,13 +1120,13 @@ export default function LandingPage() {
                 <span>Join The Waitlist</span>
               </button>
             </div>
-          </>
-        )}
+          </div>
+        </div>
       </section>
       {isWaitlistOpen && typeof document !== "undefined"
         ? createPortal(
             <div
-              className={`waitlist-modal${effectiveEnterpriseMode ? " waitlist-modal-enterprise" : ""}`}
+              className="waitlist-modal waitlist-modal-enterprise"
               role="dialog"
               aria-modal="true"
               aria-labelledby="waitlist-title"
@@ -1245,20 +1183,13 @@ export default function LandingPage() {
             document.body,
           )
         : null}
-      <BudgetPromiseSection enterprise={effectiveEnterpriseMode} />
-      {effectiveEnterpriseMode ? <EnterpriseQuoteSection /> : null}
-      {effectiveEnterpriseMode ? null : <RoutingFlowSection />}
-      <FastSetupSection enterprise={effectiveEnterpriseMode} />
+      <BudgetPromiseSection enterprise />
+      <EnterpriseQuoteSection />
+      <FastSetupSection enterprise />
       <section className="final-production-cta" aria-label="Join the waitlist">
         <strong>
-          {effectiveEnterpriseMode ? (
-            <>
-              <span>Protect the experience.</span>
-              <span>Expand the margin.</span>
-            </>
-          ) : (
-            "Be the first to start saving."
-          )}
+          <span>Protect the experience.</span>
+          <span>Expand the margin.</span>
         </strong>
         <button className="liquid-signup-button" type="button" onClick={openWaitlist}>
           <svg className="liquid-signup-bg" viewBox="0 0 232 64" aria-hidden="true">
