@@ -1,0 +1,85 @@
+:root {
+  --md-primary-fg-color: #111315;
+  --md-primary-fg-color--light: #2d3438;
+  --md-primary-fg-color--dark: #050607;
+  --md-accent-fg-color: #2d8e68;
+}
+
+[data-md-color-scheme="promptrail-light"] {
+  --md-default-bg-color: #f7f7f2;
+  --md-default-fg-color: #151719;
+  --md-code-bg-color: #ecece6;
+  --md-typeset-a-color: #247252;
+}
+
+.md-header {
+  border-bottom: 1px solid color-mix(in srgb, currentColor 14%, transparent);
+  box-shadow: none;
+}
+
+.md-typeset h1,
+.md-typeset h2,
+.md-typeset h3 {
+  font-weight: 700;
+  letter-spacing: -0.035em;
+}
+
+.md-typeset h1 {
+  max-width: 900px;
+}
+
+.hero-kicker {
+  display: inline-block;
+  margin: 0 0 0.75rem;
+  padding: 0.28rem 0.62rem;
+  border: 1px solid color-mix(in srgb, var(--md-default-fg-color) 22%, transparent);
+  border-radius: 999px;
+  color: var(--md-accent-fg-color);
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.hero-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.65rem;
+  margin: 1.6rem 0 2.3rem;
+}
+
+.feature-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem;
+  margin: 1.5rem 0 2.5rem;
+}
+
+.feature-card {
+  padding: 1rem 1.1rem;
+  border: 1px solid color-mix(in srgb, var(--md-default-fg-color) 14%, transparent);
+  border-radius: 0.55rem;
+  background: color-mix(in srgb, var(--md-default-bg-color) 92%, var(--md-accent-fg-color));
+}
+
+.feature-card h3 {
+  margin-top: 0;
+}
+
+.md-typeset .md-button--primary {
+  color: #111315;
+  background: #d8ff59;
+  border-color: #d8ff59;
+}
+
+.md-typeset .md-button--primary:hover {
+  color: #111315;
+  background: #c9ef4c;
+  border-color: #c9ef4c;
+}
+
+@media (max-width: 700px) {
+  .feature-grid {
+    grid-template-columns: 1fr;
+  }
+}

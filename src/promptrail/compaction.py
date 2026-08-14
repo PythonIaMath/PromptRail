@@ -5,6 +5,7 @@ from __future__ import annotations
 import copy
 import hashlib
 import math
+import re
 import threading
 from dataclasses import dataclass
 from uuid import uuid4
@@ -22,7 +23,21 @@ from .models import (
 
 
 class CompactionTargetPlanner:
-    """Derive an input-token target from selected-model price and call budget."""
+    """Translate Gemma's required context and importance overrides into a plan."""
+
+    def __init__(self, *, minimum_kept_tokens: int = 32) -> None:
+        if minimum_kept_tokens <= 0:
+            raise ValueError("minimum_kept_tokens must be positive")
+        self._minimum_kept_tokens = minimum_kept_tokens
+
+    def minimum_reachable_tokens(self, cache: CacheAnalysis) -> int:
+        immutable_indices = set(cache.protected_message_indices)
+        reducible_tokens = sum(
+            max(0, cache.message_tokens[index] - self._minimum_kept_tokens)
+            for index in cache.compactable_message_indices
+            if index not in immutable_indices
+        )
+        return cache.total_tokens - reducible_tokens
 
     def plan(
         self,
@@ -32,9 +47,26 @@ class CompactionTargetPlanner:
         budget: CallBudget,
     ) -> CompactionPlan:
         route = decision.route
+        target = min(cache.total_tokens, budget.required_context_tokens)
+        physically_reachable_floor = self.minimum_reachable_tokens(cache)
+        target_tokens = max(physically_reachable_floor, target)
+        required_reduction = max(0, cache.total_tokens - target_tokens)
+        protected_indices = set(cache.protected_message_indices)
+        cached_indices = set(cache.cacheable_message_indices)
+        noncached_capacity = sum(
+            max(0, cache.message_tokens[index] - self._minimum_kept_tokens)
+            for index in cache.compactable_message_indices
+            if index not in protected_indices and index not in cached_indices
+        )
+        eligible_indices = tuple(
+            index
+            for index in cache.compactable_message_indices
+            if index not in protected_indices
+            and (required_reduction > noncached_capacity or index not in cached_indices)
+        )
         cached_tokens = (
-            min(cache.total_tokens, decision.cache_value.cached_tokens)
-            if decision.cache_value.exact_reuse
+            min(target_tokens, decision.cache_value.cached_tokens)
+            if decision.cache_value.exact_reuse and required_reduction <= noncached_capacity
             else 0
         )
         cached_rate = (
@@ -42,25 +74,23 @@ class CompactionTargetPlanner:
             if cached_tokens and route.cache_read_price_per_million is not None
             else route.input_price_per_million
         )
-        fixed_cached_cost = cached_tokens * cached_rate / 1_000_000
-        remaining_input_budget = max(0.0, budget.input_cost_usd - fixed_cached_cost)
-        affordable_uncached_tokens = math.floor(
-            remaining_input_budget * 1_000_000 / max(route.input_price_per_million, 1e-12)
-        )
-        raw_target = min(cache.total_tokens, cached_tokens + affordable_uncached_tokens)
-        non_compactable_tokens = cache.total_tokens - cache.compactable_tokens
-        target_tokens = max(non_compactable_tokens, raw_target)
-        required_reduction = max(0, cache.total_tokens - target_tokens)
         estimated_cost = (
-            fixed_cached_cost
+            cached_tokens * cached_rate / 1_000_000
             + max(0, target_tokens - cached_tokens) * route.input_price_per_million / 1_000_000
         )
+        overrides = {item.block_id: item.importance for item in budget.importance_overrides}
+        importance_by_index = {
+            index: overrides.get(block.block_id, block.importance)
+            for block in cache.context_blocks
+            for index in block.message_indices
+        }
         return CompactionPlan(
             input_budget_usd=budget.input_cost_usd,
             estimated_input_cost_usd=estimated_cost,
             target_tokens=target_tokens,
             required_reduction_tokens=required_reduction,
-            compactable_message_indices=cache.compactable_message_indices,
+            compactable_message_indices=eligible_indices,
+            importance_by_message_index=importance_by_index,
         )
 
 
@@ -109,7 +139,7 @@ class InMemoryRetrievalStore:
 
 
 class CacheScopedCompactor:
-    """Reduce only message indices explicitly authorized by cache analysis."""
+    """Importance-weighted, inline-only context compaction."""
 
     def __init__(
         self,
@@ -119,12 +149,18 @@ class CacheScopedCompactor:
     ) -> None:
         if minimum_kept_tokens <= 0:
             raise ValueError("minimum_kept_tokens must be positive")
+        # Kept as a compatibility attribute for callers created before schema v2.
+        # Compacted prompts never contain retrieval IDs and no content is stored.
         self._store = store if store is not None else InMemoryRetrievalStore()
         self._minimum_kept_tokens = minimum_kept_tokens
 
     @property
     def store(self) -> InMemoryRetrievalStore:
         return self._store
+
+    @property
+    def minimum_kept_tokens(self) -> int:
+        return self._minimum_kept_tokens
 
     def compact(
         self,
@@ -140,53 +176,75 @@ class CacheScopedCompactor:
         transformed = [copy.deepcopy(message) for message in messages]
         remaining = plan.required_reduction_tokens
         records: list[CompactionRecord] = []
-        eligible = sorted(
-            plan.compactable_message_indices,
-            key=lambda index: (-cache.message_tokens[index], index),
+        block_by_index = {
+            index: block for block in cache.context_blocks for index in block.message_indices
+        }
+        immutable_indices = set(cache.protected_message_indices)
+        capacities = {
+            index: (
+                0
+                if index in immutable_indices
+                else max(0, cache.message_tokens[index] - self._minimum_kept_tokens)
+            )
+            for index in plan.compactable_message_indices
+        }
+        pressures: dict[int, float] = {}
+        for index in plan.compactable_message_indices:
+            block = block_by_index.get(index)
+            importance = plan.importance_by_message_index.get(index, 0.5)
+            redundancy = max(0.1, block.redundancy if block is not None else 0.1)
+            staleness = 1 + ((block.age if block is not None else 0) / 8)
+            cache_factor = (
+                1 / (1 + 8 * block.cache_invalidation_cost)
+                if block is not None and block.cached
+                else 1.0
+            )
+            pressures[index] = (1 - importance) ** 2 * redundancy * staleness * cache_factor
+        allocations = self._water_fill(
+            reduction=remaining,
+            capacities=capacities,
+            pressures=pressures,
         )
+        eligible = sorted(allocations, key=lambda index: (-allocations[index], index))
         for index in eligible:
-            if remaining <= 0:
-                break
             content = transformed[index].get("content")
             if not isinstance(content, str):
                 continue
             before = estimate_tokens(transformed[index])
-            maximum_reduction = max(0, before - self._minimum_kept_tokens)
-            requested_reduction = min(remaining, maximum_reduction)
+            requested_reduction = min(remaining, allocations[index])
             if requested_reduction <= 0:
                 continue
             target_content_tokens = max(
                 self._minimum_kept_tokens,
                 estimate_tokens(content) - requested_reduction,
             )
-            retrieval_id = self._store.put(session_id=session_id, content=content)
             original_hash = hashlib.sha256(content.encode("utf-8")).hexdigest()
+            block = block_by_index.get(index)
             compacted = self._compact_text(
                 content,
                 target_tokens=target_content_tokens,
-                retrieval_id=retrieval_id,
-                original_hash=original_hash,
+                block_type=block.block_type if block is not None else "generic",
             )
             transformed[index]["content"] = compacted
             after = estimate_tokens(transformed[index])
             if after >= before:
                 transformed[index] = copy.deepcopy(original[index])
-                self._store.delete(session_id=session_id, retrieval_id=retrieval_id)
                 continue
             actual_reduction = before - after
             remaining = max(0, remaining - actual_reduction)
             records.append(
                 CompactionRecord(
                     message_index=index,
-                    retrieval_id=retrieval_id,
                     original_hash=original_hash,
                     tokens_before=before,
                     tokens_after=after,
+                    block_type=block.block_type if block is not None else "generic",
+                    importance=plan.importance_by_message_index.get(index, 0.5),
                 )
             )
 
         self._validate_boundaries(original, tuple(transformed), cache, plan)
-        tokens_after = sum(estimate_tokens(message) for message in transformed)
+        tokens_after = cache.tool_tokens + sum(estimate_tokens(message) for message in transformed)
         return CompactionResult(
             messages=tuple(transformed),
             tokens_before=cache.total_tokens,
@@ -201,19 +259,65 @@ class CacheScopedCompactor:
         content: str,
         *,
         target_tokens: int,
-        retrieval_id: str,
-        original_hash: str,
+        block_type: str,
     ) -> str:
-        marker = (
-            f"\n\n[PromptRail compacted content; retrieval_id={retrieval_id}; "
-            f"sha256={original_hash}]\n\n"
-        )
+        marker = f"\n[PromptRail inline {block_type} summary]\n"
         content_budget = max(48, target_tokens * 4 - len(marker))
-        head_length = max(24, math.floor(content_budget * 0.7))
-        tail_length = max(24, content_budget - head_length)
-        if head_length + tail_length >= len(content):
+        if content_budget >= len(content):
             return content
-        return content[:head_length].rstrip() + marker + content[-tail_length:].lstrip()
+        lines = content.splitlines()
+        if block_type in {"test", "patch"}:
+            signal = re.compile(
+                r"(?i)(?:error|fail|traceback|passed|diff --git|^@@|^\+\+\+|^---|^\+|^- )"
+            )
+            important = [line for line in lines if signal.search(line)]
+        elif block_type == "tool":
+            signal = re.compile(r"(?i)(?:^/|\.py\b|\.json\b|\.toml\b|exit |error|warning)")
+            important = [line for line in lines if signal.search(line)]
+        else:
+            important = []
+        head_budget = max(24, math.floor(content_budget * 0.45))
+        tail_budget = max(24, math.floor(content_budget * 0.25))
+        signal_budget = max(0, content_budget - head_budget - tail_budget)
+        signal_text = "\n".join(important)[:signal_budget].rstrip()
+        parts = [content[:head_budget].rstrip(), marker.strip()]
+        if signal_text:
+            parts.append(signal_text)
+        parts.append(content[-tail_budget:].lstrip())
+        return "\n".join(part for part in parts if part)
+
+    @staticmethod
+    def _water_fill(
+        *,
+        reduction: int,
+        capacities: dict[int, int],
+        pressures: dict[int, float],
+    ) -> dict[int, int]:
+        """Allocate reduction proportionally, redistributing capped shares."""
+
+        allocations = {index: 0 for index in capacities}
+        active = {index for index, capacity in capacities.items() if capacity > 0}
+        remaining = reduction
+        while remaining > 0 and active:
+            total_pressure = sum(max(pressures[index], 1e-9) for index in active)
+            progressed = 0
+            for index in tuple(sorted(active)):
+                capacity = capacities[index] - allocations[index]
+                share = max(
+                    1,
+                    math.floor(remaining * max(pressures[index], 1e-9) / total_pressure),
+                )
+                amount = min(capacity, share, remaining)
+                allocations[index] += amount
+                remaining -= amount
+                progressed += amount
+                if allocations[index] >= capacities[index]:
+                    active.discard(index)
+                if remaining <= 0:
+                    break
+            if progressed == 0:
+                break
+        return {index: amount for index, amount in allocations.items() if amount > 0}
 
     @staticmethod
     def _validate_boundaries(
@@ -227,7 +331,5 @@ class CacheScopedCompactor:
             changed = canonical_json(old) != canonical_json(new)
             if changed and index not in authorized:
                 raise CompactionError(f"compaction changed unauthorized message index {index}")
-            if index in cache.cacheable_message_indices and changed:
-                raise CompactionError(f"compaction invalidated cacheable message index {index}")
             if index in cache.protected_message_indices and changed:
                 raise CompactionError(f"compaction changed protected message index {index}")

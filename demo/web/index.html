@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light" />
+    <title>PromptRail Codex Comparison</title>
+    <meta name="description" content="A real side-by-side Codex and PromptRail comparison." />
+    <link rel="stylesheet" href="/styles.css" />
+    <script src="/app.js" defer></script>
+  </head>
+  <body>
+    <main class="terminal-shell">
+      <header class="totals-bar" aria-live="polite">
+        <span>BASELINE&nbsp;&nbsp;<b id="baseline-cost">$0.000000</b>&nbsp;&nbsp;<b id="baseline-tokens">0 tok</b></span>
+        <i>|</i>
+        <span>PROMPTRAIL&nbsp;&nbsp;<b id="managed-cost">$0.000000</b>&nbsp;&nbsp;<b id="managed-tokens">0 tok</b></span>
+        <i>|</i>
+        <span>SAVED&nbsp;&nbsp;<b id="saved-cost">$0.000000</b></span>
+      </header>
+
+      <section class="comparison" aria-label="Codex comparison">
+        <article class="lane baseline-lane">
+          <h1>CODEX · BASELINE · <span id="baseline-model">openai/gpt-5.6-sol</span></h1>
+          <div id="baseline-log" class="log" role="log" aria-label="Baseline Codex output"></div>
+        </article>
+        <article class="lane managed-lane">
+          <h1>CODEX · PROMPTRAIL · <span id="managed-model">selecting</span></h1>
+          <div id="managed-log" class="log" role="log" aria-label="PromptRail Codex output"></div>
+        </article>
+      </section>
+
+      <section class="terminal-footer">
+        <div id="decision" class="decision">Waiting for PromptRail decision</div>
+        <div class="status-row">
+          <span id="status">Ready for turn 1</span>
+          <span id="phase" class="phase ready">READY</span>
+        </div>
+        <div id="model-selector" class="model-selector" aria-label="Baseline model selector"></div>
+        <form id="prompt-form">
+          <label for="prompt">&gt;</label>
+          <textarea
+            id="prompt"
+            rows="1"
+            autocomplete="off"
+            spellcheck="true"
+            placeholder="Write one prompt for both Codex agents · /model lists baselines"
+            autofocus
+          ></textarea>
+          <button type="submit">SEND ↵</button>
+        </form>
+      </section>
+    </main>
+
+    <section id="savings-screen" class="savings-screen" aria-live="assertive" hidden>
+      <p id="savings-heading">PROMPTRAIL SAVINGS</p>
+      <strong id="savings-percentage">0.0%</strong>
+      <h2 id="savings-label">0.0% SAVED</h2>
+      <div class="savings-lanes">
+        <p id="savings-baseline"></p>
+        <p id="savings-managed"></p>
+      </div>
+      <p id="savings-detail"></p>
+      <small id="savings-countdown">Conversation resumes in 5s</small>
+    </section>
+    <div id="toast" role="alert"></div>
+  </body>
+</html>

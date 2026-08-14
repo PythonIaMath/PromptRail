@@ -1,0 +1,28 @@
+{
+  "analytics_insight": "Minimize total OpenRouter cost while preserving strong coding-agent quality. Prefer cache reuse and compact only safe older assistant or tool content.",
+  "cost_priority": 2.5,
+  "latency_priority": 0.35,
+  "quality_priority": 1.0,
+  "cache_priority": 2.0,
+  "minimum_quality": 0.0,
+  "task_rules": [
+    {
+      "name": "coding and codebase work",
+      "match_terms": [
+        "architecture",
+        "bug",
+        "code",
+        "codebase",
+        "fix",
+        "implement",
+        "repository"
+      ],
+      "minimum_quality": 0.1
+    }
+  ],
+  "provider_exploration_fraction": 0.5,
+  "maximum_provider_exploration_ms": 2000,
+  "controller_reserve_ms": 120000,
+  "compaction_reserve_ms": 100,
+  "latency_safety_margin_ms": 100
+}

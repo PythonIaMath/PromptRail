@@ -1,0 +1,6 @@
+{"time":1786128482.020751,"stage":"starting","completed":0,"total":3,"detail":"Connecting to the real PromptRail control-plane services."}
+{"time":1786128486.245752,"stage":"warm","completed":1,"total":3,"detail":"Connections warmed; measuring reused sessions."}
+{"time":1786128491.187364,"stage":"warm","completed":2,"total":3,"detail":"Warm sample 1 of 1: short_chat."}
+{"time":1786128492.692448,"stage":"multiturn","completed":2,"total":3,"detail":"Verifying continuity across 2 real turns."}
+{"time":1786128501.794435,"stage":"cold","completed":3,"total":3,"detail":"Multi-turn continuity verified; measuring cold starts."}
+{"time":1786128501.795163,"stage":"complete","completed":3,"total":3,"detail":"Benchmark complete. Results are provider-reported and real-service only."}

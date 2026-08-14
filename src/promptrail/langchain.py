@@ -56,9 +56,8 @@ class PromptRailContext:
     enterprise_json_paths: tuple[str | Path, ...]
     candidates: tuple[ModelCandidate, ...]
     task: str = "LangChain agent model call"
-    predicted_output_tokens: int = 512
+    max_output_tokens: int | None = None
     priority: float = 1.0
-    expected_remaining_calls: int | None = None
     required_capabilities: frozenset[str] = frozenset()
 
     def __post_init__(self) -> None:
@@ -138,9 +137,7 @@ def provider_router_headers(prepared: PreparedCall) -> dict[str, str]:
     if deadline:
         if prepared.provider.start_within_ms <= 0:
             raise IntegrationError("deadline provider plan requires a positive exploration window")
-        headers["x-promptrail-start-within-ms"] = str(
-            prepared.provider.start_within_ms
-        )
+        headers["x-promptrail-start-within-ms"] = str(prepared.provider.start_within_ms)
     return headers
 
 
@@ -322,9 +319,7 @@ class LangChainUsageExtractor:
         return 0
 
 
-class PromptRailMiddleware(
-    AgentMiddleware[PromptRailAgentState, PromptRailContext, Any]
-):
+class PromptRailMiddleware(AgentMiddleware[PromptRailAgentState, PromptRailContext, Any]):
     """Apply PromptRail policy to every model call in a LangChain agent."""
 
     state_schema = PromptRailAgentState
@@ -537,9 +532,8 @@ class PromptRailMiddleware(
             messages=messages,
             tools=tools,
             required_capabilities=frozenset(capabilities),
-            predicted_output_tokens=context.predicted_output_tokens,
+            max_output_tokens=context.max_output_tokens,
             priority=context.priority,
-            expected_remaining_calls=context.expected_remaining_calls,
         )
 
     def _routed_request(

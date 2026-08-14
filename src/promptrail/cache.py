@@ -10,7 +10,14 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from .models import CacheAnalysis, CacheValue, ModelCandidate, ModelUsage, ProviderRoute
+from .models import (
+    CacheAnalysis,
+    CacheValue,
+    ContextBlock,
+    ModelCandidate,
+    ModelUsage,
+    ProviderRoute,
+)
 
 _ERROR_RE = re.compile(
     r"(?im)(?:^|\b)(?:ERROR|FAILED|FAILURE|FATAL|Traceback|"
@@ -36,10 +43,16 @@ def estimate_tokens(value: Any) -> int:
     return max(1, (length + 3) // 4)
 
 
-def _prefix_hash(messages: tuple[dict[str, Any], ...], count: int) -> str | None:
-    if count <= 0:
+def _prefix_hash(
+    messages: tuple[dict[str, Any], ...],
+    count: int,
+    tools: tuple[dict[str, Any], ...],
+) -> str | None:
+    if count <= 0 and not tools:
         return None
-    return hashlib.sha256(canonical_json(messages[:count])).hexdigest()
+    return hashlib.sha256(
+        canonical_json({"messages": messages[:count], "tools": tools})
+    ).hexdigest()
 
 
 @dataclass(frozen=True)
@@ -74,16 +87,19 @@ class PromptCacheCoordinator:
         *,
         session_id: str,
         messages: tuple[dict[str, Any], ...],
+        tools: tuple[dict[str, Any], ...],
         candidates: tuple[ModelCandidate, ...],
         predicted_output_tokens: int,
-        expected_future_calls: int,
+        task: str = "",
+        context_blocks: tuple[ContextBlock, ...] | None = None,
     ) -> CacheAnalysis:
         if not messages:
             raise ValueError("cache analysis requires at least one message")
         message_tokens = tuple(estimate_tokens(message) for message in messages)
-        total_tokens = sum(message_tokens)
+        tool_tokens = sum(estimate_tokens(tool) for tool in tools)
+        total_tokens = sum(message_tokens) + tool_tokens
         proposed_count = self._proposed_prefix_count(messages)
-        proposed_hash = _prefix_hash(messages, proposed_count)
+        proposed_hash = _prefix_hash(messages, proposed_count, tools)
         now = datetime.now(UTC)
         with self._lock:
             state = self._sessions.get(session_id, _SessionState())
@@ -95,15 +111,15 @@ class PromptCacheCoordinator:
             active_exact = bool(
                 record
                 and record.message_count <= len(messages)
-                and _prefix_hash(messages, record.message_count) == record.prefix_hash
+                and _prefix_hash(messages, record.message_count, tools) == record.prefix_hash
             )
-            protected_prefix_count = max(
-                proposed_count,
-                record.message_count if record is not None and active_exact else 0,
+            confirmed_prefix_count = (
+                record.message_count
+                if record is not None and active_exact and record.prefix_tokens > 0
+                else 0
             )
-            prefix_hash = _prefix_hash(messages, protected_prefix_count)
-            cacheable_indices = tuple(range(protected_prefix_count))
-            protected_indices = self._protected_indices(messages, cacheable_indices)
+            cacheable_indices = tuple(range(confirmed_prefix_count))
+            protected_indices = self._protected_indices(messages)
             compactable_indices = tuple(
                 index
                 for index, message in enumerate(messages)
@@ -111,23 +127,50 @@ class PromptCacheCoordinator:
                 and message_tokens[index] >= self._minimum_compactable_tokens
                 and self._safe_compactable_message(message)
             )
-            cacheable_tokens = sum(message_tokens[index] for index in cacheable_indices)
+            cacheable_tokens = (
+                record.prefix_tokens
+                if record is not None and confirmed_prefix_count
+                else 0
+            )
             compactable_tokens = sum(message_tokens[index] for index in compactable_indices)
-            protected_dynamic_tokens = total_tokens - cacheable_tokens - compactable_tokens
+            accounted_message_indices = set(cacheable_indices) | set(compactable_indices)
+            accounted_tokens = sum(
+                message_tokens[index] for index in accounted_message_indices
+            ) + (tool_tokens if confirmed_prefix_count else 0)
+            protected_dynamic_tokens = max(0, total_tokens - accounted_tokens)
             values = {
                 candidate.model_id: self._candidate_value(
                     candidate=candidate,
                     total_tokens=total_tokens,
                     predicted_output_tokens=predicted_output_tokens,
                     record=record if active_exact else None,
-                    expected_future_calls=expected_future_calls,
                 )
                 for candidate in candidates
             }
+            raw_blocks = context_blocks or self.build_context_blocks(messages=messages, task=task)
+            blocks = tuple(
+                block.model_copy(
+                    update={
+                        "cached": any(
+                            index in cacheable_indices for index in block.message_indices
+                        ),
+                        "cache_invalidation_cost": (
+                            block.tokens / max(1, cacheable_tokens)
+                            if any(index in cacheable_indices for index in block.message_indices)
+                            else 0.0
+                        ),
+                    }
+                )
+                for block in raw_blocks
+            )
             return CacheAnalysis(
                 total_tokens=total_tokens,
+                tool_tokens=tool_tokens,
                 message_tokens=message_tokens,
-                prefix_hash=prefix_hash or proposed_hash,
+                # This is the prefix offered to the provider by the current call. It is
+                # deliberately separate from cacheable_message_indices, which only describe
+                # a prefix the provider has already reported as cached.
+                prefix_hash=proposed_hash,
                 cacheable_message_indices=cacheable_indices,
                 protected_message_indices=protected_indices,
                 compactable_message_indices=compactable_indices,
@@ -137,7 +180,88 @@ class PromptCacheCoordinator:
                 last_model_id=state.last_model_id,
                 last_provider=state.last_provider,
                 values=values,
+                context_blocks=blocks,
             )
+
+    @classmethod
+    def build_context_blocks(
+        cls,
+        *,
+        messages: tuple[dict[str, Any], ...],
+        task: str,
+    ) -> tuple[ContextBlock, ...]:
+        """Build deterministic units before Gemma supplies bounded overrides."""
+
+        task_terms = set(re.findall(r"[a-z0-9_]{3,}", task.casefold()))
+        latest_user = next(
+            (
+                index
+                for index in range(len(messages) - 1, -1, -1)
+                if str(messages[index].get("role") or "").casefold() == "user"
+                and not messages[index].get("tool_call_id")
+            ),
+            None,
+        )
+        latest_tool = next(
+            (
+                index
+                for index in range(len(messages) - 1, -1, -1)
+                if str(messages[index].get("role") or "").casefold() == "tool"
+                or messages[index].get("tool_call_id")
+            ),
+            None,
+        )
+        seen: dict[str, int] = {}
+        blocks: list[ContextBlock] = []
+        for index, message in enumerate(messages):
+            role = str(message.get("role") or "").casefold()
+            text = cls._content_text(message.get("content"))
+            if role in {"system", "developer"}:
+                block_type = "protocol"
+            elif role == "user":
+                block_type = "user"
+            elif role == "tool" or message.get("tool_call_id"):
+                if re.search(r"(?im)(?:pytest|unittest|\btests?\b|passed|failed)", text):
+                    block_type = "test"
+                elif re.search(r"(?m)^(?:diff --git|@@ |\+\+\+ |--- )", text):
+                    block_type = "patch"
+                else:
+                    block_type = "tool"
+            elif role == "assistant":
+                block_type = "assistant"
+            else:
+                block_type = "generic"
+            content_terms = set(re.findall(r"[a-z0-9_]{3,}", text.casefold()))
+            overlap = len(task_terms & content_terms) / max(1, len(task_terms))
+            fingerprint = hashlib.sha256(canonical_json(message)).hexdigest()
+            duplicate = seen.get(fingerprint, 0)
+            seen[fingerprint] = duplicate + 1
+            age = len(messages) - index - 1
+            immutable = role in {"system", "developer"} or index == latest_user
+            if immutable:
+                importance = 1.0
+            elif index == latest_tool:
+                importance = 0.95
+            elif _ERROR_RE.search(text) or block_type in {"test", "patch"}:
+                importance = 0.9
+            else:
+                recency = 1 / (1 + age / 4)
+                importance = min(0.95, 0.25 + 0.45 * overlap + 0.3 * recency)
+            blocks.append(
+                ContextBlock(
+                    block_id=f"ctx_{fingerprint[:16]}_{duplicate}",
+                    message_indices=(index,),
+                    block_type=block_type,
+                    tokens=estimate_tokens(message),
+                    age=age,
+                    task_overlap=overlap,
+                    redundancy=min(1.0, duplicate * 0.5),
+                    cache_invalidation_cost=0.0,
+                    importance=importance,
+                    structurally_immutable=immutable,
+                )
+            )
+        return tuple(blocks)
 
     def observe(
         self,
@@ -154,24 +278,41 @@ class PromptCacheCoordinator:
             state.last_model_id = usage.model_id
             state.last_provider = usage.provider
             cache_observed = usage.cache_read_tokens > 0 or usage.cache_write_tokens > 0
-            if (
-                analysis.prefix_hash
-                and analysis.cacheable_message_indices
-                and route.cache_supported
-                and (route.cache_automatic or cache_observed)
-            ):
+            if analysis.prefix_hash and route.cache_supported and cache_observed:
                 state.record = _CacheRecord(
                     model_id=usage.model_id,
                     provider=usage.provider,
                     prefix_hash=analysis.prefix_hash,
-                    message_count=len(analysis.cacheable_message_indices),
-                    prefix_tokens=max(
-                        usage.cache_read_tokens,
-                        usage.cache_write_tokens,
-                        analysis.cacheable_tokens,
-                    ),
+                    message_count=self._candidate_prefix_count(analysis),
+                    prefix_tokens=max(usage.cache_read_tokens, usage.cache_write_tokens),
                     expires_at=datetime.now(UTC) + timedelta(seconds=route.cache_ttl_seconds),
                 )
+
+    @staticmethod
+    def _candidate_prefix_count(analysis: CacheAnalysis) -> int:
+        """Recover the proposed prefix boundary without retaining prompt content."""
+
+        latest_user = max(
+            (
+                index
+                for block in analysis.context_blocks
+                if block.block_type == "user" and block.structurally_immutable
+                for index in block.message_indices
+            ),
+            default=None,
+        )
+        if latest_user is not None:
+            return latest_user
+        protocol_indices = {
+            index
+            for block in analysis.context_blocks
+            if block.block_type == "protocol"
+            for index in block.message_indices
+        }
+        count = 0
+        while count in protocol_indices:
+            count += 1
+        return count
 
     @staticmethod
     def _proposed_prefix_count(messages: tuple[dict[str, Any], ...]) -> int:
@@ -197,9 +338,8 @@ class PromptCacheCoordinator:
     def _protected_indices(
         cls,
         messages: tuple[dict[str, Any], ...],
-        cacheable_indices: tuple[int, ...],
     ) -> tuple[int, ...]:
-        protected = set(cacheable_indices)
+        protected: set[int] = set()
         latest_user = next(
             (
                 index
@@ -222,8 +362,6 @@ class PromptCacheCoordinator:
                 call_id = str(tool_call.get("id") or "") if isinstance(tool_call, dict) else ""
                 if call_id and call_id not in tool_results:
                     protected.add(index)
-            if _ERROR_RE.search(cls._content_text(message.get("content"))):
-                protected.add(index)
         return tuple(sorted(protected))
 
     @classmethod
@@ -232,9 +370,7 @@ class PromptCacheCoordinator:
         if role not in {"assistant", "tool"}:
             return False
         content = message.get("content")
-        if not isinstance(content, str) or not content.strip():
-            return False
-        return not _ERROR_RE.search(content)
+        return isinstance(content, str) and bool(content.strip())
 
     @staticmethod
     def _content_text(content: Any) -> str:
@@ -269,7 +405,6 @@ class PromptCacheCoordinator:
         total_tokens: int,
         predicted_output_tokens: int,
         record: _CacheRecord | None,
-        expected_future_calls: int,
     ) -> CacheValue:
         route_costs: list[tuple[float, ProviderRoute, bool, int]] = []
         for route in candidate.routes:
@@ -298,7 +433,9 @@ class PromptCacheCoordinator:
         )
         uncached_cost = total_tokens * selected_route.input_price_per_million / 1_000_000
         current_savings = max(0.0, uncached_cost - input_cost)
-        retained_value = current_savings * max(1, expected_future_calls)
+        # Open-ended agents do not have a defensible fixed remaining-call count.
+        # Value the cache on the current/next-call horizon without inventing one.
+        retained_value = current_savings
         switch_cost = 0.0
         if record and not exact:
             record_route = next(
@@ -319,7 +456,6 @@ class PromptCacheCoordinator:
                     min(total_tokens, record.prefix_tokens)
                     * max(0.0, record_route.input_price_per_million - cached_rate)
                     / 1_000_000
-                    * max(1, expected_future_calls)
                 )
         return CacheValue(
             model_id=candidate.model_id,

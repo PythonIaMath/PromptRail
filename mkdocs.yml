@@ -1,0 +1,69 @@
+site_name: PromptRail SDK
+site_description: Python SDK documentation for PromptRail runtime tracing, correlation, and historical imports
+site_url: https://pythoniamath.github.io/PromptRail/
+repo_url: https://github.com/PythonIaMath/PromptRail
+repo_name: PythonIaMath/PromptRail
+edit_uri: edit/main/docs/
+docs_dir: docs
+site_dir: site
+strict: true
+
+theme:
+  name: material
+  language: en
+  logo: assets/logo.svg
+  favicon: assets/logo.svg
+  features:
+    - navigation.instant
+    - navigation.sections
+    - navigation.top
+    - navigation.footer
+    - content.code.copy
+    - content.tabs.link
+    - search.suggest
+    - search.highlight
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: promptrail-light
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: custom
+      accent: custom
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
+
+nav:
+  - Overview: index.md
+  - Python SDK: runtime-sdk.md
+  - Event schema: runtime-event-schema.md
+  - Architecture: runtime-sdk-architecture.md
+  - Performance: runtime-benchmarks.md
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.details
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.superfences
+
+extra_css:
+  - stylesheets/extra.css
+
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/PythonIaMath/PromptRail
+  generator: false
+
+copyright: PromptRail · Runtime intelligence for every LLM call

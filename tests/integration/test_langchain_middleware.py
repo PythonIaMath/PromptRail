@@ -13,10 +13,23 @@ from langchain_core.outputs import ChatGeneration, ChatResult
 from langchain_core.tools import tool
 from pydantic import PrivateAttr
 
-from promptrail import ModelCandidate, OperatingPolicy, PromptRailGateway, ProviderRoute
-from promptrail.errors import CompactionError
+from promptrail import (
+    GEMMA_12B_MODEL_ID,
+    BudgetAllocationDecision,
+    CacheAwareLeRouter,
+    ModelCandidate,
+    OperatingPolicy,
+    PromptRailGateway,
+    ProviderRoute,
+    SuppliedLeRouterRanker,
+)
 from promptrail.langchain import PromptRailContext, PromptRailMiddleware
-from promptrail.models import PreparedCall, ProviderRoutingMode, RunStatus
+from promptrail.models import (
+    OutputLengthPrediction,
+    PreparedCall,
+    ProviderRoutingMode,
+    RunStatus,
+)
 from promptrail.policy import SuppliedPolicyAgent
 
 
@@ -66,6 +79,30 @@ class CapturingModelFactory:
         return self.model
 
 
+class FixedGemmaAllocator:
+    model_id = GEMMA_12B_MODEL_ID
+
+    def allocate(self, request):
+        return BudgetAllocationDecision(
+            cost_usd=0.5,
+            latency_ms=5_000,
+            input_cost_fraction=0.02,
+            required_context_tokens=max(1, request.input_tokens // 2),
+            reason="Scripted Gemma allocation for the middleware test.",
+        )
+
+
+class FixedOutputPredictor:
+    def predict(self, *, messages, max_output_tokens=None):
+        del messages
+        predicted = min(64, max_output_tokens or 64)
+        return OutputLengthPrediction(
+            predicted_tokens=predicted,
+            raw_predicted_tokens=64,
+            latency_ms=1,
+        )
+
+
 def _route(
     route_id: str,
     provider: str,
@@ -92,11 +129,9 @@ def _route(
 
 def _policy() -> OperatingPolicy:
     return OperatingPolicy(
-        instruction="Prefer cheap providers while preserving the latency SLO and prompt cache.",
-        workflow_cost_budget_usd=1,
-        workflow_latency_budget_ms=10_000,
-        expected_llm_calls=2,
-        input_cost_fraction=0.02,
+        analytics_insight=(
+            "Prefer cheap providers while preserving the latency objective and prompt cache."
+        ),
         latency_priority=0.5,
         cache_priority=2,
         provider_exploration_fraction=0.5,
@@ -171,7 +206,12 @@ def test_langchain_middleware_controls_full_agent_lifecycle(tmp_path, async_invo
         ]
     )
     factory = CapturingModelFactory(scripted)
-    gateway = PromptRailGateway(policy_agent=SuppliedPolicyAgent(_policy()))
+    gateway = PromptRailGateway(
+        policy_agent=SuppliedPolicyAgent(_policy()),
+        budget_allocator=FixedGemmaAllocator(),
+        model_router=CacheAwareLeRouter(SuppliedLeRouterRanker()),
+        output_predictor=FixedOutputPredictor(),
+    )
     middleware = PromptRailMiddleware(gateway=gateway, model_factory=factory)
     agent = create_agent(
         model=scripted,
@@ -185,7 +225,7 @@ def test_langchain_middleware_controls_full_agent_lifecycle(tmp_path, async_invo
         enterprise_json_paths=(enterprise,),
         candidates=(candidate,),
         task="inspect a deployment with tools",
-        predicted_output_tokens=64,
+        max_output_tokens=64,
     )
 
     if async_invocation:
@@ -204,9 +244,7 @@ def test_langchain_middleware_controls_full_agent_lifecycle(tmp_path, async_invo
     first, second = factory.prepared
     assert first.provider.mode is ProviderRoutingMode.DEADLINE
     assert first.provider.start_within_ms != 700
-    assert factory.headers[0]["x-promptrail-start-within-ms"] == str(
-        first.provider.start_within_ms
-    )
+    assert factory.headers[0]["x-promptrail-start-within-ms"] == str(first.provider.start_within_ms)
     assert second.provider.mode is ProviderRoutingMode.STICKY
     assert second.provider.routes[0].provider == "slow-provider"
     assert "x-promptrail-start-within-ms" not in factory.headers[1]
@@ -217,7 +255,7 @@ def test_langchain_middleware_controls_full_agent_lifecycle(tmp_path, async_invo
     assert second_request[0].content == "Never disclose customer secrets."
     assert second_request[1].content == "Inspect the deployment."
     tool_message = next(message for message in second_request if isinstance(message, ToolMessage))
-    assert "PromptRail compacted content" in str(tool_message.content)
+    assert "PromptRail inline tool summary" in str(tool_message.content)
     assert len(str(tool_message.content)) < len("INFO deployment healthy\n" * 1_500)
 
     run_id = first.budget.run_id
@@ -225,9 +263,4 @@ def test_langchain_middleware_controls_full_agent_lifecycle(tmp_path, async_invo
     assert snapshot.status is RunStatus.COMPLETED
     assert snapshot.completed_calls == 2
     assert snapshot.tool_calls == 1
-    record = second.compaction.records[0]
-    with pytest.raises(CompactionError):
-        gateway.compactor.store.get(
-            session_id=context.session_id,
-            retrieval_id=record.retrieval_id,
-        )
+    assert gateway.compactor.store.delete_session(context.session_id) == 0

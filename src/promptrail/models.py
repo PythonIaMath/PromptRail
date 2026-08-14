@@ -22,7 +22,7 @@ def _finite(value: float, field: str, *, minimum: float = 0.0) -> float:
 
 
 class TaskRule(FrozenModel):
-    """Optional deterministic weighting for a class of agent work."""
+    """Optional analytics guidance for a class of agent work."""
 
     name: str
     match_terms: tuple[str, ...] = ()
@@ -59,14 +59,14 @@ class TaskRule(FrozenModel):
 
 
 class OperatingPolicy(FrozenModel):
-    """Validated instruction produced from enterprise JSON data."""
+    """Validated analytics insight and optional enterprise hard limits."""
 
     schema_version: Literal[1] = 1
-    instruction: str
-    workflow_cost_budget_usd: float
-    workflow_latency_budget_ms: int
-    expected_llm_calls: int
-    input_cost_fraction: float = 0.55
+    analytics_insight: str
+    hard_agent_cost_limit_usd: float | None = None
+    hard_agent_latency_limit_ms: int | None = None
+    hard_call_cost_limit_usd: float | None = None
+    hard_call_latency_limit_ms: int | None = None
     cost_priority: float = 1.0
     latency_priority: float = 1.0
     quality_priority: float = 1.0
@@ -80,26 +80,30 @@ class OperatingPolicy(FrozenModel):
     task_rules: tuple[TaskRule, ...] = ()
     source_digest: str | None = None
 
-    @field_validator("instruction")
+    @field_validator("analytics_insight")
     @classmethod
-    def validate_instruction(cls, value: str) -> str:
+    def validate_analytics_insight(cls, value: str) -> str:
         normalized = value.strip()
         if not normalized:
-            raise ValueError("policy instruction cannot be empty")
+            raise ValueError("analytics insight cannot be empty")
         if len(normalized) > 8_000:
-            raise ValueError("policy instruction exceeds 8,000 characters")
+            raise ValueError("analytics insight exceeds 8,000 characters")
         return normalized
 
-    @field_validator("workflow_cost_budget_usd")
+    @field_validator("hard_agent_cost_limit_usd", "hard_call_cost_limit_usd")
     @classmethod
-    def validate_cost(cls, value: float) -> float:
-        return _finite(value, "workflow_cost_budget_usd", minimum=0.000001)
+    def validate_optional_cost(cls, value: float | None) -> float | None:
+        if value is None:
+            return None
+        return _finite(value, "hard cost limit", minimum=0.000001)
 
-    @field_validator("workflow_latency_budget_ms", "expected_llm_calls")
+    @field_validator("hard_agent_latency_limit_ms", "hard_call_latency_limit_ms")
     @classmethod
-    def validate_positive_int(cls, value: int) -> int:
+    def validate_optional_latency(cls, value: int | None) -> int | None:
+        if value is None:
+            return None
         if isinstance(value, bool) or value <= 0:
-            raise ValueError("budget counts and durations must be positive integers")
+            raise ValueError("hard latency limits must be positive integers")
         return value
 
     @field_validator(
@@ -115,7 +119,6 @@ class OperatingPolicy(FrozenModel):
         return value
 
     @field_validator(
-        "input_cost_fraction",
         "provider_exploration_fraction",
         "minimum_quality",
     )
@@ -228,9 +231,9 @@ class CallIntent(FrozenModel):
     messages: tuple[dict[str, Any], ...]
     tools: tuple[dict[str, Any], ...] = ()
     required_capabilities: frozenset[str] = frozenset()
-    predicted_output_tokens: int = 512
+    predicted_output_tokens: int | None = None
+    max_output_tokens: int | None = None
     priority: float = 1.0
-    expected_remaining_calls: int | None = None
 
     @field_validator("session_id", "task")
     @classmethod
@@ -239,17 +242,124 @@ class CallIntent(FrozenModel):
             raise ValueError("session_id and task cannot be empty")
         return value.strip()
 
-    @field_validator("predicted_output_tokens")
+    @field_validator("predicted_output_tokens", "max_output_tokens")
     @classmethod
-    def validate_output_tokens(cls, value: int) -> int:
-        if isinstance(value, bool) or value <= 0:
-            raise ValueError("predicted_output_tokens must be positive")
+    def validate_output_tokens(cls, value: int | None) -> int | None:
+        if value is not None and (isinstance(value, bool) or value <= 0):
+            raise ValueError("output token values must be positive")
         return value
 
     @field_validator("priority")
     @classmethod
     def validate_call_priority(cls, value: float) -> float:
         return _finite(value, "call priority", minimum=0.05)
+
+
+class ContextBlock(FrozenModel):
+    """One independently compactable unit of conversation context."""
+
+    block_id: str
+    message_indices: tuple[int, ...]
+    block_type: Literal["protocol", "user", "assistant", "tool", "test", "patch", "generic"]
+    tokens: int
+    age: int
+    cached: bool = False
+    task_overlap: float = Field(ge=0, le=1)
+    redundancy: float = Field(ge=0, le=1)
+    cache_invalidation_cost: float = Field(ge=0)
+    importance: float = Field(ge=0, le=1)
+    structurally_immutable: bool = False
+
+
+class ImportanceOverride(FrozenModel):
+    block_id: str
+    importance: float = Field(ge=0, le=1)
+
+
+class OutputLengthPrediction(FrozenModel):
+    predicted_tokens: int
+    raw_predicted_tokens: float
+    latency_ms: int
+    model_id: str = "lerouter-modernbert-output-length"
+
+    @field_validator("predicted_tokens")
+    @classmethod
+    def validate_predicted_tokens(cls, value: int) -> int:
+        if isinstance(value, bool) or value <= 0:
+            raise ValueError("predicted_tokens must be a positive integer")
+        return value
+
+    @field_validator("latency_ms")
+    @classmethod
+    def validate_prediction_latency(cls, value: int) -> int:
+        if isinstance(value, bool) or value < 0:
+            raise ValueError("prediction latency must be a non-negative integer")
+        return value
+
+    @field_validator("raw_predicted_tokens")
+    @classmethod
+    def validate_raw_prediction(cls, value: float) -> float:
+        return _finite(value, "raw_predicted_tokens", minimum=0.000001)
+
+
+class BudgetAllocationDecision(FrozenModel):
+    """The per-call allocation proposed by the pinned Gemma 12B controller."""
+
+    schema_version: Literal[2] = 2
+    cost_usd: float
+    latency_ms: int
+    input_cost_fraction: float = Field(ge=0.000001, lt=1)
+    required_context_tokens: int
+    importance_overrides: tuple[ImportanceOverride, ...] = ()
+    reason: str
+
+    @field_validator("required_context_tokens")
+    @classmethod
+    def validate_required_context(cls, value: int) -> int:
+        if isinstance(value, bool) or value <= 0:
+            raise ValueError("required_context_tokens must be positive")
+        return value
+
+    @field_validator("importance_overrides")
+    @classmethod
+    def validate_importance_overrides(
+        cls, value: tuple[ImportanceOverride, ...]
+    ) -> tuple[ImportanceOverride, ...]:
+        if len(value) > 12:
+            raise ValueError("Gemma may override at most 12 ambiguous context blocks")
+        if len({item.block_id for item in value}) != len(value):
+            raise ValueError("importance override block IDs must be unique")
+        return value
+
+    @field_validator("cost_usd")
+    @classmethod
+    def validate_decision_cost(cls, value: float) -> float:
+        return _finite(value, "allocated call cost", minimum=0.000001)
+
+    @field_validator("latency_ms")
+    @classmethod
+    def validate_decision_latency(cls, value: int) -> int:
+        if isinstance(value, bool) or value <= 0:
+            raise ValueError("allocated call latency must be a positive integer")
+        return value
+
+    @field_validator("input_cost_fraction")
+    @classmethod
+    def validate_input_fraction(cls, value: float) -> float:
+        number = _finite(value, "input_cost_fraction", minimum=0.000001)
+        if number >= 1:
+            raise ValueError("input_cost_fraction must be < 1")
+        return number
+
+    @field_validator("reason")
+    @classmethod
+    def validate_reason(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("budget allocation reason cannot be empty")
+        if len(normalized) > 1_000:
+            raise ValueError("budget allocation reason exceeds 1,000 characters")
+        return normalized
 
 
 class CallBudget(FrozenModel):
@@ -260,7 +370,10 @@ class CallBudget(FrozenModel):
     input_cost_usd: float
     output_cost_usd: float
     latency_ms: int
-    allocation_weight: float
+    allocator_model_id: str
+    allocator_reason: str
+    required_context_tokens: int
+    importance_overrides: tuple[ImportanceOverride, ...] = ()
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
 
@@ -276,6 +389,7 @@ class CacheValue(FrozenModel):
 
 class CacheAnalysis(FrozenModel):
     total_tokens: int
+    tool_tokens: int
     message_tokens: tuple[int, ...]
     prefix_hash: str | None
     cacheable_message_indices: tuple[int, ...]
@@ -287,6 +401,64 @@ class CacheAnalysis(FrozenModel):
     last_model_id: str | None = None
     last_provider: str | None = None
     values: dict[str, CacheValue] = Field(default_factory=dict)
+    context_blocks: tuple[ContextBlock, ...] = ()
+
+
+class BudgetCandidateOption(FrozenModel):
+    """Feasibility evidence for Gemma; downstream LeRouter still chooses."""
+
+    model_id: str
+    quality: float
+    context_fits: bool
+    required_capabilities_supported: bool
+    cheapest_predicted_cost_usd: float
+    cheapest_input_cost_fraction: float = Field(ge=0.000001, lt=1)
+    fastest_predicted_latency_ms: int
+    exact_cache_reuse: bool
+    cached_tokens: int
+
+
+class BudgetAllocationRequest(FrozenModel):
+    """Bounded context supplied to Gemma for one open-ended agent call."""
+
+    schema_version: Literal[2] = 2
+    run_id: str
+    session_id: str
+    call_id: str
+    sequence: int
+    analytics_insight: str
+    source_digest: str | None = None
+    task_rules: tuple[TaskRule, ...] = ()
+    cost_priority: float
+    latency_priority: float
+    quality_priority: float
+    cache_priority: float
+    task: str
+    input_tokens: int
+    predicted_output_tokens: int
+    priority: float
+    required_capabilities: tuple[str, ...] = ()
+    completed_calls: int
+    tool_calls: int
+    elapsed_agent_ms: int
+    spent_cost_usd: float
+    spent_latency_ms: int
+    reserved_cost_usd: float
+    reserved_latency_ms: int
+    hard_agent_cost_limit_usd: float | None = None
+    hard_agent_latency_limit_ms: int | None = None
+    hard_call_cost_limit_usd: float | None = None
+    hard_call_latency_limit_ms: int | None = None
+    remaining_hard_cost_usd: float | None = None
+    remaining_hard_latency_ms: int | None = None
+    cacheable_tokens: int
+    compactable_tokens: int
+    last_model_id: str | None = None
+    last_provider: str | None = None
+    cache_input_cost_usd_by_model: dict[str, float] = Field(default_factory=dict)
+    exact_cache_models: tuple[str, ...] = ()
+    candidate_options: tuple[BudgetCandidateOption, ...]
+    context_blocks: tuple[ContextBlock, ...]
 
 
 class ModelDecision(FrozenModel):
@@ -295,6 +467,8 @@ class ModelDecision(FrozenModel):
     score: float
     base_router_score: float
     predicted_cost_usd: float
+    predicted_input_cost_usd: float
+    predicted_output_tokens: int
     predicted_latency_ms: int
     cache_value: CacheValue
     reasons: tuple[str, ...] = ()
@@ -322,14 +496,16 @@ class CompactionPlan(FrozenModel):
     target_tokens: int
     required_reduction_tokens: int
     compactable_message_indices: tuple[int, ...]
+    importance_by_message_index: dict[int, float] = Field(default_factory=dict)
 
 
 class CompactionRecord(FrozenModel):
     message_index: int
-    retrieval_id: str
     original_hash: str
     tokens_before: int
     tokens_after: int
+    block_type: str
+    importance: float
 
 
 class CompactionResult(FrozenModel):
@@ -348,7 +524,17 @@ class PreparedCall(FrozenModel):
     model: ModelDecision
     provider: ProviderRoutingPlan
     compaction: CompactionResult
+    model_alternatives: tuple[ModelDecision, ...] = ()
     preparation_latency_ms: int = 0
+    predicted_output_tokens: int
+    output_prediction_ms: int = 0
+    context_analysis_ms: int = 0
+    gemma_allocation_ms: int = 0
+    semantic_ranking_ms: int = 0
+    candidate_feasibility_ms: int = 0
+    compaction_ms: int = 0
+    provider_planning_ms: int = 0
+    control_plane_total_ms: int = 0
 
 
 class ModelUsage(FrozenModel):

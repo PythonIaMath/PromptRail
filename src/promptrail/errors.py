@@ -10,7 +10,7 @@ class PolicyError(PromptRailError):
 
 
 class BudgetError(PromptRailError):
-    """A workflow or call cannot be authorized within its budget."""
+    """An agent call cannot be authorized or settled within its allocation."""
 
 
 class RoutingError(PromptRailError):

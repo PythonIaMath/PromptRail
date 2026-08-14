@@ -1,4 +1,7 @@
 .env
+__pycache__/
+demo/.env
+demo/runs/
 .venv/
 __pycache__/
 *.py[cod]
@@ -10,4 +13,3 @@ coverage.xml
 dist/
 build/
 *.egg-info/
-
