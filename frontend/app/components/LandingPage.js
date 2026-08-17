@@ -74,52 +74,6 @@ function HeroBackgroundImage() {
   );
 }
 
-function useHeadlineInkScroll(heroRef, inkPathRef, enabled = true) {
-  useLayoutEffect(() => {
-    if (!enabled) {
-      return undefined;
-    }
-
-    const hero = heroRef.current;
-    const path = inkPathRef.current;
-
-    if (!hero || !path) {
-      return undefined;
-    }
-
-    const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
-    const length = path.getTotalLength();
-
-    gsap.set(path, {
-      strokeDasharray: length,
-      strokeDashoffset: reduceMotion.matches ? 0 : length,
-      opacity: reduceMotion.matches ? 1 : 0,
-    });
-
-    if (reduceMotion.matches) {
-      return undefined;
-    }
-
-    const context = gsap.context(() => {
-      gsap.to(path, {
-        strokeDashoffset: 0,
-        opacity: 1,
-        ease: "none",
-        scrollTrigger: {
-          trigger: hero,
-          start: "top top",
-          end: () => `+=${Math.max(560, window.innerHeight * 0.9)}`,
-          pin: true,
-          anticipatePin: 1,
-          scrub: true,
-        },
-      });
-    }, hero);
-
-    return () => context.revert();
-  }, [heroRef, inkPathRef, enabled]);
-}
-
 function makeSignupButtonPath(shape) {
   const isAtRest = ["top", "right", "bottom", "left"].every((key) => {
     return Math.abs(shape[key]) < 0.001;
