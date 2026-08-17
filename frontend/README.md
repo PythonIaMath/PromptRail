@@ -32,13 +32,13 @@ npm run build
 npm run audit:production
 ```
 
-`npm run check` runs the test suite followed by a production build. The test suite covers authentication redirects, bounded request bodies, installation flows, plugin access and checkout, Infinite routing authority, credential envelopes, server environment loading, privacy copy, and the bundled PromptRail CLI.
+`npm run check` runs the test suite, creates a production build, then starts that build and verifies the public `/` route serves the enterprise landing rather than the retired consumer hero. The test suite also covers authentication redirects, bounded request bodies, installation flows, plugin access and checkout, Infinite routing authority, credential envelopes, server environment loading, privacy copy, and the bundled PromptRail CLI.
 
 ## Application areas
 
 | Area | Routes |
 | --- | --- |
-| Marketing | `/`, `/plugins`, `/blog`, `/blog/[slug]` |
+| Marketing | `/` (enterprise landing), `/plugins`, `/blog`, `/blog/[slug]` |
 | Documentation | `/docs`, `/docs/sdk`, `/connect` |
 | Account | `/login`, `/check-email`, `/onboarding`, `/device` |
 | Product | `/dashboard`, `/dashboard/analytics`, `/dashboard/api-keys`, `/dashboard/credit`, `/dashboard/settings`, `/dashboard/setup` |
