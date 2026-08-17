@@ -9,9 +9,10 @@
     "prebuild": "node scripts/package-promptrail-cli.mjs",
     "audit:production": "npm audit --omit=dev --audit-level=high",
     "build": "next build",
-    "check": "npm test && npm run build",
+    "check": "npm test && npm run build && npm run test:landing:production",
     "start": "next start",
     "test": "node --test app/lib/*.test.mjs app/privacy/page.test.mjs packages/promptrail-cli/test/*.test.mjs",
+    "test:landing:production": "node scripts/test-enterprise-landing-production.mjs",
     "test:cli": "node --test packages/promptrail-cli/test/*.test.mjs",
     "test:installation": "node --test app/lib/installation.test.mjs"
   },
