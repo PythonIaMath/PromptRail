@@ -2839,8 +2839,8 @@ h1 {
     box-shadow: 0 16px 42px rgba(20, 94, 168, 0.14);
 }
 
-.liquid-signup-button:focus-visible {
-    outline-color: rgba(255, 255, 255, 0.35);
+.landing-page-enterprise .liquid-signup-button:focus-visible {
+    outline-color: #0b67c2;
 }
 
 .waitlist-modal {

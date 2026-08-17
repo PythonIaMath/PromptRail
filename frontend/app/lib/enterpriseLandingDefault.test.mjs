@@ -10,11 +10,13 @@ const landingSource = readFileSync(
 test("the root landing component always renders the enterprise experience", () => {
   assert.match(landingSource, /<main className="landing-page landing-page-enterprise">/);
   assert.match(landingSource, /Save 70% on token costs/);
-  assert.match(landingSource, /<BudgetPromiseSection enterprise \/>/);
+  assert.match(landingSource, /<EnterpriseSavingsFlow \/>/);
   assert.match(landingSource, /<EnterpriseQuoteSection \/>/);
-  assert.match(landingSource, /<FastSetupSection enterprise \/>/);
+  assert.match(landingSource, /<EnterprisePrivateModelsSection \/>/);
 
   assert.doesNotMatch(landingSource, /canShowEnterpriseMode/);
   assert.doesNotMatch(landingSource, /effectiveEnterpriseMode/);
   assert.doesNotMatch(landingSource, /process\.env\.NODE_ENV/);
+  assert.doesNotMatch(landingSource, /RoutingFlowSection/);
+  assert.doesNotMatch(landingSource, /BudgetComparisonVisual/);
 });
